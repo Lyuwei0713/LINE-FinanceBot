@@ -59,6 +59,7 @@ def handle_message(event):
         )
 
 if __name__ == "__main__":
-    # Render 會自動分配通訊埠，這行很重要
+    # 這裡必須抓環境變數的 PORT，預設給 8080
     port = int(os.environ.get('PORT', 8080))
+    # host 必須是 0.0.0.0，這樣外部才連得進來
     app.run(host='0.0.0.0', port=port)
