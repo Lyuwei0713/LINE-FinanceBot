@@ -46,29 +46,19 @@ def callback():
         print(f"Webhook Error: {e}")
         abort(400)
     return 'OK'
-
 @app.route("/authorize/<user_id>")
 def authorize(user_id):
     flow = Flow.from_client_secrets_file('client_secret.json', scopes=SCOPES, redirect_uri=f"{RENDER_URL}/oauth2callback")
-    # 修正：加上 code_challenge_method=None 解決 Missing code verifier 錯誤
-    authorization_url, state = flow.authorization_url(
-        access_type='offline', 
-        prompt='consent', 
-        state=user_id,
-        code_challenge_method=None
-    )
+    authorization_url, state = flow.authorization_url(access_type='offline', prompt='consent', state=user_id)
     return redirect(authorization_url)
-
+    
 @app.route("/oauth2callback")
 def oauth2callback():
     user_id = request.args.get('state')
     flow = Flow.from_client_secrets_file('client_secret.json', scopes=SCOPES, redirect_uri=f"{RENDER_URL}/oauth2callback")
-    
-    # 修正：加上 code_verifier=None
-    flow.fetch_token(authorization_response=request.url, code_verifier=None)
+    flow.fetch_token(authorization_response=request.url)
     creds = flow.credentials
     
-    # 1. 存入 Firebase
     db.reference(f'users/{user_id}').update({
         'token': creds.token,
         'refresh_token': creds.refresh_token,
@@ -78,7 +68,6 @@ def oauth2callback():
         'scopes': creds.scopes
     })
 
-    # 2. 主動推播歡迎訊息
     try:
         with ApiClient(configuration) as api_client:
             line_bot_api = MessagingApi(api_client)
@@ -97,10 +86,10 @@ def oauth2callback():
     return """
     <div style="font-family: sans-serif; text-align: center; padding: 50px;">
         <h1 style="color: #00B900;">✅ 授權成功！</h1>
-        <p style="font-size: 18px;">請回到 LINE 聊天室查看教學，現在可以關閉此分頁。</p>
+        <p style="font-size: 18px;">請回到 LINE 聊天室查看教學。</p>
     </div>
     """
-
+    
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
     user_id = event.source.user_id
