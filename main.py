@@ -49,7 +49,7 @@ def handle_message(event):
     user_id = event.source.user_id
     # 這裡之後要寫邏輯：檢查資料庫是否有此 user_id 的 token
     # 如果沒有，回傳授權連結：
-    auth_link = f"{RENDER_URL}/authorize/{user_id}"
+    auth_link = f"{RENDER_URL}/authorize/{user_id}?openExternalBrowser=1"
     reply_text = f"歡迎使用！請先點擊以下連結授權 Google 權限：\n{auth_link}"
     
     with ApiClient(configuration) as api_client:
