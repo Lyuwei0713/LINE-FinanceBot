@@ -8,52 +8,35 @@ import base64
 from firebase_admin import credentials, db
 from flask import Flask, request, abort, redirect
 from linebot.v3 import WebhookHandler
-from linebot.v3.messaging import (
-    Configuration, 
-    ApiClient, 
-    MessagingApi, 
-    ReplyMessageRequest, 
-    TextMessage, 
-    PushMessageRequest
-)
+from linebot.v3.messaging import Configuration, ApiClient, MessagingApi, ReplyMessageRequest, TextMessage, PushMessageRequest
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from datetime import datetime
 
 app = Flask(__name__)
-# 允許非 HTTPS 跳轉
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 
-# --- 1. 初始化 Firebase (安全版) ---
+# --- 1. 初始化 Firebase (從環境變數讀取 JSON 字串) ---
 if not firebase_admin._apps:
-    # 從環境變數讀取 JSON 字串，避免直接上傳金鑰檔
-    firebase_config = os.environ.get('FIREBASE_CONFIG_JSON')
-    if firebase_config:
-        cred_dict = json.loads(firebase_config)
+    fb_config_str = os.environ.get('FIREBASE_CONFIG_JSON')
+    db_url = os.environ.get('FIREBASE_DB_URL')
+    if fb_config_str:
+        cred_dict = json.loads(fb_config_str)
         cred = credentials.Certificate(cred_dict)
-        firebase_admin.initialize_app(cred, {
-            'databaseURL': 'https://financebot-db-default-rtdb.firebaseio.com/'
-        })
-    else:
-        # 這是為了防錯，如果環境變數沒設定好會提醒你
-        print("Error: FIREBASE_CONFIG_JSON not found in environment variables")
+        firebase_admin.initialize_app(cred, {'databaseURL': db_url})
 
-# --- 2. 設定參數 ---
+# --- 2. 設定參數 (全數從環境變數讀取) ---
 LINE_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
 LINE_SECRET = os.environ.get('LINE_CHANNEL_SECRET')
 RENDER_URL = os.environ.get('RENDER_URL')
+G_CONFIG_STR = os.environ.get('G_CLIENT_SECRET_JSON')
 
-# 讀取 Google Client Config (同樣從環境變數讀取)
-G_CONFIG = os.environ.get('G_CLIENT_SECRET_JSON')
-if G_CONFIG:
-    GOOGLE_CLIENT_CONFIG = json.loads(G_CONFIG)
-else:
-    print("Error: G_CLIENT_SECRET_JSON not found in environment variables")
+# 先行解析 Google 配置
+GOOGLE_CLIENT_CONFIG = json.loads(G_CONFIG_STR) if G_CONFIG_STR else None
 
 configuration = Configuration(access_token=LINE_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_SECRET)
-# 權限字串
 SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets'
 
 @app.route("/callback", methods=['POST'])
@@ -69,14 +52,10 @@ def callback():
 
 @app.route("/authorize/<user_id>")
 def authorize(user_id):
-    with open('client_secret.json', 'r') as f:
-        client_config = json.load(f)['web']
-    
-    # --- 手動生成 PKCE 驗證碼 ---
+    client_config = GOOGLE_CLIENT_CONFIG['web']
     code_verifier = secrets.token_urlsafe(64)
     code_challenge = base64.urlsafe_b64encode(hashlib.sha256(code_verifier.encode()).digest()).decode().replace('=', '').replace('+', '-').replace('/', '_')
     
-    # 暫存 Verifier 到 Firebase，以便 callback 時取出
     db.reference(f'temp_auth/{user_id}').set({'verifier': code_verifier})
     
     auth_url = (
@@ -97,17 +76,14 @@ def authorize(user_id):
 def oauth2callback():
     code = request.args.get('code')
     user_id = request.args.get('state')
-    
-    # 拿回 Verifier
     temp_ref = db.reference(f'temp_auth/{user_id}').get()
+    
     if not temp_ref:
-        return "驗證逾時或狀態錯誤，請重新從 LINE 點擊連結。"
+        return "驗證逾時，請重新點擊連結。"
+    
     code_verifier = temp_ref['verifier']
+    client_config = GOOGLE_CLIENT_CONFIG['web']
 
-    with open('client_secret.json', 'r') as f:
-        client_config = json.load(f)['web']
-
-    # 手動 Request 換取 Token
     token_url = "https://oauth2.googleapis.com/token"
     payload = {
         'code': code,
@@ -124,7 +100,6 @@ def oauth2callback():
     if 'error' in token_data:
         return f"授權失敗：{token_data.get('error_description')}"
 
-    # 正式存入用戶資料
     db.reference(f'users/{user_id}').update({
         'token': token_data.get('access_token'),
         'refresh_token': token_data.get('refresh_token'),
@@ -133,23 +108,18 @@ def oauth2callback():
         'client_secret': client_config['client_secret'],
         'scopes': SCOPES.split()
     })
-    
     db.reference(f'temp_auth/{user_id}').delete()
 
-    # 主動發送教學訊息
     try:
         with ApiClient(configuration) as api_client:
             line_bot_api = MessagingApi(api_client)
-            welcome_text = "🎊 授權成功！現在您可以開始記帳了。\n\n📍 格式：項目 金額\n範例：早餐 80"
-            line_bot_api.push_message(PushMessageRequest(to=user_id, messages=[TextMessage(text=welcome_text)]))
+            line_bot_api.push_message(PushMessageRequest(
+                to=user_id, 
+                messages=[TextMessage(text="🎊 授權成功！請輸入「項目 金額」開始記帳。")]
+            ))
     except: pass
 
-    return """
-    <div style="font-family: sans-serif; text-align: center; padding: 50px;">
-        <h1 style="color: #00B900;">✅ 授權成功！</h1>
-        <p>請回到 LINE 聊天室，我已經把教學傳給您了。</p>
-    </div>
-    """
+    return '<h1 style="text-align:center;padding-top:50px;font-family:sans-serif;color:#00B900;">✅ 授權成功！請回到 LINE</h1>'
 
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
@@ -158,7 +128,7 @@ def handle_message(event):
 
     if not user_data or 'refresh_token' not in user_data:
         auth_link = f"{RENDER_URL}/authorize/{user_id}?openExternalBrowser=1"
-        reply_text = f"歡迎！請先授權 Google 帳號以建立記帳本：\n{auth_link}"
+        reply_text = f"歡迎！請先授權：\n{auth_link}"
     else:
         msg = event.message.text.split()
         if len(msg) == 2 and msg[1].isdigit():
@@ -172,7 +142,6 @@ def handle_message(event):
                     client_secret=user_data['client_secret'],
                     scopes=user_data['scopes']
                 )
-                
                 drive_service = build('drive', 'v3', credentials=creds)
                 sheets_service = build('sheets', 'v4', credentials=creds)
 
@@ -200,14 +169,12 @@ def handle_message(event):
                 ).execute()
                 reply_text = f"✅ 已紀錄：{item} ${price}"
             except Exception as e:
-                print(f"Record Error: {e}")
                 reply_text = "⚠️ 紀錄失敗，請重新授權。"
         else:
             reply_text = "格式：項目 金額（例如：便當 100）"
 
     with ApiClient(configuration) as api_client:
-        line_bot_api = MessagingApi(api_client)
-        line_bot_api.reply_message(ReplyMessageRequest(
+        MessagingApi(api_client).reply_message(ReplyMessageRequest(
             reply_token=event.reply_token,
             messages=[TextMessage(text=reply_text)]
         ))
