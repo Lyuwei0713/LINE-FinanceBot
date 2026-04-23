@@ -25,17 +25,31 @@ app = Flask(__name__)
 # 允許非 HTTPS 跳轉
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 
-# --- 1. 初始化 Firebase ---
+# --- 1. 初始化 Firebase (安全版) ---
 if not firebase_admin._apps:
-    cred = credentials.Certificate('firebase_admin.json')
-    firebase_admin.initialize_app(cred, {
-        'databaseURL': 'https://financebot-db-default-rtdb.firebaseio.com/'
-    })
+    # 從環境變數讀取 JSON 字串，避免直接上傳金鑰檔
+    firebase_config = os.environ.get('FIREBASE_CONFIG_JSON')
+    if firebase_config:
+        cred_dict = json.loads(firebase_config)
+        cred = credentials.Certificate(cred_dict)
+        firebase_admin.initialize_app(cred, {
+            'databaseURL': 'https://financebot-db-default-rtdb.firebaseio.com/'
+        })
+    else:
+        # 這是為了防錯，如果環境變數沒設定好會提醒你
+        print("Error: FIREBASE_CONFIG_JSON not found in environment variables")
 
 # --- 2. 設定參數 ---
 LINE_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
 LINE_SECRET = os.environ.get('LINE_CHANNEL_SECRET')
 RENDER_URL = os.environ.get('RENDER_URL')
+
+# 讀取 Google Client Config (同樣從環境變數讀取)
+G_CONFIG = os.environ.get('G_CLIENT_SECRET_JSON')
+if G_CONFIG:
+    GOOGLE_CLIENT_CONFIG = json.loads(G_CONFIG)
+else:
+    print("Error: G_CLIENT_SECRET_JSON not found in environment variables")
 
 configuration = Configuration(access_token=LINE_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_SECRET)
