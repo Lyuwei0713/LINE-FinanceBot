@@ -52,21 +52,26 @@ def authorize(user_id):
 @app.route("/oauth2callback")
 def oauth2callback():
     user_id = request.args.get('state')
-    flow = Flow.from_client_secrets_file('client_secret.json', scopes=SCOPES, redirect_uri=f"{RENDER_URL}/oauth2callback")
-    flow.fetch_token(authorization_response=request.url)
-    creds = flow.credentials
-    
-    # 存入 Firebase
-    db.reference(f'users/{user_id}').update({
-        'token': creds.token,
-        'refresh_token': creds.refresh_token,
-        'token_uri': creds.token_uri,
-        'client_id': creds.client_id,
-        'client_secret': creds.client_secret,
-        'scopes': creds.scopes
-    })
-    return "✅ 授權成功！請回到 LINE 開始記帳（格式：項目 金額）。"
+    # ... (原本 fetch_token 與存入 Firebase 的代碼) ...
 
+    # --- 加入這段：主動發送 LINE 歡迎訊息 ---
+    with ApiClient(configuration) as api_client:
+        line_bot_api = MessagingApi(api_client)
+        welcome_msg = (
+            "🎊 恭喜！Google 授權成功！\n\n"
+            "現在您可以直接傳送訊息給我來記帳了。\n\n"
+            "📍 記帳格式：\n"
+            "「項目 金額」\n"
+            "範例：午餐 120\n\n"
+            "📝 我會自動在您的雲端硬碟建立「LINE_Finance_記帳本」試算表，快來試試看吧！"
+        )
+        line_bot_api.push_message(PushMessageRequest(
+            to=user_id,
+            messages=[TextMessage(text=welcome_msg)]
+        ))
+    # ------------------------------------
+
+    return "✅ 授權成功！請回到 LINE 查看教學。"
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
     user_id = event.source.user_id
