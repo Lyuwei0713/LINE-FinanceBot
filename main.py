@@ -1,73 +1,60 @@
 import os
-from flask import Flask, request, abort
-import requests
+import json
+from flask import Flask, request, abort, redirect, url_for
 from linebot.v3 import WebhookHandler
-from linebot.v3.exceptions import InvalidSignatureError
-from linebot.v3.messaging import (
-    Configuration, ApiClient, MessagingApi, ReplyMessageRequest, TextMessage
-)
+from linebot.v3.messaging import Configuration, ApiClient, MessagingApi, ReplyMessageRequest, TextMessage
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
+from google_auth_oauthlib.flow import Flow
+from googleapiclient.discovery import build
 
 app = Flask(__name__)
 
-
-LINE_ACCESS_TOKEN = '5jhOdDGeTSmFacb5B+LlxoU0v3gDfBoFQ7dtOkqGH1XjxbFeU0W7rCbNEpIl4SburH287JeYzd9BM7PJLmXMkfaUelsxq0tyeY7kXiVcJbb4C+Y52V9jLNNlRFtlyH7UseXHL7BCdGV97LPnAOsnowdB04t89/1O/w1cDnyilFU='
-LINE_SECRET = 'f73eb030318f5abb7ecbcdab8fa20d6f'
-GAS_URL = 'https://script.google.com/macros/s/AKfycbyUGvT0RiXWtVyFwbk_NZ8_3r-ZYPPhM3BZR4fwl8iRTWt4FtBhlG6h4ID_uWp5Z8MvnQ/exec' 
+# --- 設定環境變數 ---
+LINE_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
+LINE_SECRET = os.environ.get('LINE_CHANNEL_SECRET')
+RENDER_URL = os.environ.get('RENDER_URL') # 例如 https://xxx.onrender.com
 
 configuration = Configuration(access_token=LINE_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_SECRET)
+SCOPES = ['https://www.googleapis.com/auth/drive.file']
 
 @app.route("/callback", methods=['POST'])
 def callback():
     signature = request.headers.get('X-Line-Signature')
     body = request.get_data(as_text=True)
-    try:
-        handler.handle(body, signature)
-    except InvalidSignatureError:
-        abort(400)
+    handler.handle(body, signature)
     return 'OK'
+
+@app.route("/authorize/<user_id>")
+def authorize(user_id):
+    # 建立授權流
+    flow = Flow.from_client_secrets_file(
+        'client_secret.json',
+        scopes=SCOPES,
+        redirect_uri=f"{RENDER_URL}/oauth2callback"
+    )
+    # 把 user_id 放在 state 裡傳給 Google，回傳時才知道是誰
+    authorization_url, state = flow.authorization_url(access_type='offline', state=user_id)
+    return redirect(authorization_url)
+
+@app.route("/oauth2callback")
+def oauth2callback():
+    user_id = request.args.get('state')
+    # 這裡應該要將取得的 credentials 存入資料庫 (例如 Firebase)
+    # 為了教學簡化，我們先確認能換到 token
+    return f"授權成功！{user_id} 您的記帳表已準備好，請回到 LINE。"
 
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
-    user_msg = event.message.text
-    # 核心修改：抓取使用者的唯一識別碼 (user_id)
-    user_id = event.source.user_id 
+    user_id = event.source.user_id
+    # 這裡之後要寫邏輯：檢查資料庫是否有此 user_id 的 token
+    # 如果沒有，回傳授權連結：
+    auth_link = f"{RENDER_URL}/authorize/{user_id}"
+    reply_text = f"歡迎使用！請先點擊以下連結授權 Google 權限：\n{auth_link}"
     
-    parts = user_msg.split()
-    
-    if len(parts) == 2 and parts[1].isdigit():
-        item = parts[0]
-        price = parts[1]
-        
-        # 打包資料：包含使用者 ID、項目和金額
-        payload = {
-            "user_id": user_id, 
-            "item": item, 
-            "price": price
-        }
-        
-        try:
-            # 將資料推送到 GAS
-            requests.post(GAS_URL, json=payload)
-            reply_text = f"✅ 已為您記錄：{item} ${price}"
-        except:
-            reply_text = "⚠️ 系統連線失敗，請稍後再試。"
-    else:
-        reply_text = "格式錯誤！請輸入：項目 金額（例如：晚餐 200）"
-
-    # 回覆訊息
     with ApiClient(configuration) as api_client:
         line_bot_api = MessagingApi(api_client)
-        line_bot_api.reply_message_with_http_info(
-            ReplyMessageRequest(
-                reply_token=event.reply_token,
-                messages=[TextMessage(text=reply_text)]
-            )
-        )
-
-if __name__ == "__main__":
-    # 這裡必須抓環境變數的 PORT，預設給 8080
-    port = int(os.environ.get('PORT', 8080))
-    # host 必須是 0.0.0.0，這樣外部才連得進來
-    app.run(host='0.0.0.0', port=port)
+        line_bot_api.reply_message(ReplyMessageRequest(
+            reply_token=event.reply_token,
+            messages=[TextMessage(text=reply_text)]
+        ))
