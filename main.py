@@ -16,9 +16,10 @@ app = Flask(__name__)
 # --- 1. 初始化 Firebase ---
 if not firebase_admin._apps:
     cred = credentials.Certificate('firebase_admin.json')
+    # 這裡如果是填「你的資料庫網址」而沒有換成真正的 https://...，程式會崩潰
     firebase_admin.initialize_app(cred, {
-        'databaseURL': 'https://financebot-db-default-rtdb.firebaseio.com/'
-    })
+    'databaseURL': 'https://financebot-db-default-rtdb.firebaseio.com/' 
+})
 
 # --- 2. 設定 LINE 與 Google 參數 ---
 LINE_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
