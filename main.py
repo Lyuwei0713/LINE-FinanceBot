@@ -31,24 +31,32 @@ def callback():
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
     user_msg = event.message.text
+    # 核心修改：抓取使用者的唯一識別碼 (user_id)
+    user_id = event.source.user_id 
+    
     parts = user_msg.split()
     
-    # 記帳判斷邏輯
     if len(parts) == 2 and parts[1].isdigit():
         item = parts[0]
         price = parts[1]
         
-        # 傳送資料給 Google Apps Script (GAS)
-        payload = {"item": item, "price": price}
+        # 打包資料：包含使用者 ID、項目和金額
+        payload = {
+            "user_id": user_id, 
+            "item": item, 
+            "price": price
+        }
+        
         try:
+            # 將資料推送到 GAS
             requests.post(GAS_URL, json=payload)
-            reply_text = f"✅ 已記錄：{item} ${price}"
+            reply_text = f"✅ 已為您記錄：{item} ${price}"
         except:
-            reply_text = "⚠️ 記錄失敗，請檢查 GAS 網址。"
+            reply_text = "⚠️ 系統連線失敗，請稍後再試。"
     else:
-        reply_text = "格式：項目 金額 (例如: 午餐 100)"
+        reply_text = "格式錯誤！請輸入：項目 金額（例如：晚餐 200）"
 
-    # 回覆訊息給使用者
+    # 回覆訊息
     with ApiClient(configuration) as api_client:
         line_bot_api = MessagingApi(api_client)
         line_bot_api.reply_message_with_http_info(
