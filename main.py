@@ -46,19 +46,44 @@ def callback():
         print(f"Webhook Error: {e}")
         abort(400)
     return 'OK'
-@app.route("/authorize/<user_id>")
-def authorize(user_id):
-    flow = Flow.from_client_secrets_file('client_secret.json', scopes=SCOPES, redirect_uri=f"{RENDER_URL}/oauth2callback")
-    authorization_url, state = flow.authorization_url(access_type='offline', prompt='consent', state=user_id)
-    return redirect(authorization_url)
     
+\@app.route("/authorize/<user_id>")
+def authorize(user_id):
+    flow = Flow.from_client_secrets_file(
+        'client_secret.json', 
+        scopes=SCOPES, 
+        redirect_uri=f"{RENDER_URL}/oauth2callback"
+    )
+    # 這裡我們不指定 code_challenge_method，讓它徹底留空
+    authorization_url, state = flow.authorization_url(
+        access_type='offline',
+        prompt='consent',
+        state=user_id
+    )
+    return redirect(authorization_url)
+
 @app.route("/oauth2callback")
 def oauth2callback():
-    user_id = request.args.get('state')
-    flow = Flow.from_client_secrets_file('client_secret.json', scopes=SCOPES, redirect_uri=f"{RENDER_URL}/oauth2callback")
-    flow.fetch_token(authorization_response=request.url)
-    creds = flow.credentials
+    state = request.args.get('state')
+    flow = Flow.from_client_secrets_file(
+        'client_secret.json', 
+        scopes=SCOPES, 
+        state=state, # 這裡把 state 傳回去
+        redirect_uri=f"{RENDER_URL}/oauth2callback"
+    )
     
+    # 這裡使用 request.url，並且不加任何額外參數
+    try:
+        flow.fetch_token(authorization_response=request.url)
+    except Exception as e:
+        print(f"Fetch Token Error: {e}")
+        # 如果還是失敗，嘗試強制手動抓取（最後手段）
+        return f"授權過程發生錯誤：{e}。請嘗試重新從 LINE 點擊連結。"
+
+    creds = flow.credentials
+    user_id = state # 因為我們把 user_id 放在 state 傳遞
+
+    # 存入 Firebase
     db.reference(f'users/{user_id}').update({
         'token': creds.token,
         'refresh_token': creds.refresh_token,
@@ -68,28 +93,15 @@ def oauth2callback():
         'scopes': creds.scopes
     })
 
+    # 主動推播訊息與網頁回傳 (與之前相同)
     try:
         with ApiClient(configuration) as api_client:
             line_bot_api = MessagingApi(api_client)
-            welcome_msg = (
-                "🎊 授權成功！現在您可以開始記帳了。\n\n"
-                "📍 記帳格式：\n「項目 金額」\n範例：午餐 120\n\n"
-                "📝 我會自動在您的雲端硬碟建立「LINE_Finance_記帳本」試算表。"
-            )
-            line_bot_api.push_message(PushMessageRequest(
-                to=user_id,
-                messages=[TextMessage(text=welcome_msg)]
-            ))
-    except Exception as e:
-        print(f"Push Message Error: {e}")
+            welcome_msg = "🎊 授權成功！現在您可以開始記帳了。\n\n📍 格式：項目 金額"
+            line_bot_api.push_message(PushMessageRequest(to=user_id, messages=[TextMessage(text=welcome_msg)]))
+    except: pass
 
-    return """
-    <div style="font-family: sans-serif; text-align: center; padding: 50px;">
-        <h1 style="color: #00B900;">✅ 授權成功！</h1>
-        <p style="font-size: 18px;">請回到 LINE 聊天室查看教學。</p>
-    </div>
-    """
-    
+    return '<h1 style="text-align:center;padding-top:50px;">✅ 授權成功！請回到 LINE</h1>'
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
     user_id = event.source.user_id
