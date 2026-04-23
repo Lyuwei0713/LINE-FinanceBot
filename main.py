@@ -2,6 +2,9 @@ import os
 import json
 import requests
 import firebase_admin
+import secrets
+import hashlib
+import base64
 from firebase_admin import credentials, db
 from flask import Flask, request, abort, redirect
 from linebot.v3 import WebhookHandler
@@ -14,13 +17,12 @@ from linebot.v3.messaging import (
     PushMessageRequest
 )
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
-from google_auth_oauthlib.flow import Flow
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from datetime import datetime
 
 app = Flask(__name__)
-# 允許 OAuth 在非 HTTPS 環境下進行某些跳轉（對偵錯有幫助）
+# 允許非 HTTPS 跳轉
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 
 # --- 1. 初始化 Firebase ---
@@ -37,7 +39,8 @@ RENDER_URL = os.environ.get('RENDER_URL')
 
 configuration = Configuration(access_token=LINE_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_SECRET)
-SCOPES = ['https://www.googleapis.com/auth/drive.file', 'https://www.googleapis.com/auth/spreadsheets']
+# 權限字串
+SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets'
 
 @app.route("/callback", methods=['POST'])
 def callback():
@@ -52,72 +55,87 @@ def callback():
 
 @app.route("/authorize/<user_id>")
 def authorize(user_id):
-    flow = Flow.from_client_secrets_file(
-        'client_secret.json', 
-        scopes=SCOPES, 
-        redirect_uri=f"{RENDER_URL}/oauth2callback"
+    with open('client_secret.json', 'r') as f:
+        client_config = json.load(f)['web']
+    
+    # --- 手動生成 PKCE 驗證碼 ---
+    code_verifier = secrets.token_urlsafe(64)
+    code_challenge = base64.urlsafe_b64encode(hashlib.sha256(code_verifier.encode()).digest()).decode().replace('=', '').replace('+', '-').replace('/', '_')
+    
+    # 暫存 Verifier 到 Firebase，以便 callback 時取出
+    db.reference(f'temp_auth/{user_id}').set({'verifier': code_verifier})
+    
+    auth_url = (
+        f"https://accounts.google.com/o/oauth2/v2/auth?"
+        f"client_id={client_config['client_id']}&"
+        f"redirect_uri={RENDER_URL}/oauth2callback&"
+        f"response_type=code&"
+        f"scope={SCOPES}&"
+        f"access_type=offline&"
+        f"prompt=consent&"
+        f"state={user_id}&"
+        f"code_challenge={code_challenge}&"
+        f"code_challenge_method=S256"
     )
-    # 這裡產生的 URL 會引導使用者去 Google 登入
-    authorization_url, state = flow.authorization_url(
-        access_type='offline',
-        prompt='consent',
-        state=user_id
-    )
-    return redirect(authorization_url)
+    return redirect(auth_url)
 
 @app.route("/oauth2callback")
 def oauth2callback():
-    # 從 Google 回傳的網址中取得 code 與 state (user_id)
     code = request.args.get('code')
     user_id = request.args.get('state')
     
-    if not code:
-        return "授權失敗，未取得驗證碼。"
+    # 拿回 Verifier
+    temp_ref = db.reference(f'temp_auth/{user_id}').get()
+    if not temp_ref:
+        return "驗證逾時或狀態錯誤，請重新從 LINE 點擊連結。"
+    code_verifier = temp_ref['verifier']
 
-    # 讀取 client_secret.json
     with open('client_secret.json', 'r') as f:
         client_config = json.load(f)['web']
 
-    # --- 關鍵修正：手動使用 requests 向 Google 換取 Token，避開 PKCE 檢查 ---
+    # 手動 Request 換取 Token
     token_url = "https://oauth2.googleapis.com/token"
     payload = {
         'code': code,
         'client_id': client_config['client_id'],
         'client_secret': client_config['client_secret'],
         'redirect_uri': f"{RENDER_URL}/oauth2callback",
-        'grant_type': 'authorization_code'
+        'grant_type': 'authorization_code',
+        'code_verifier': code_verifier
     }
     
     res = requests.post(token_url, data=payload)
     token_data = res.json()
 
     if 'error' in token_data:
-        print(f"Google Token Error: {token_data}")
-        return f"授權發生錯誤：{token_data.get('error_description')}"
+        return f"授權失敗：{token_data.get('error_description')}"
 
-    # 存入 Firebase
+    # 正式存入用戶資料
     db.reference(f'users/{user_id}').update({
         'token': token_data.get('access_token'),
         'refresh_token': token_data.get('refresh_token'),
         'token_uri': "https://oauth2.googleapis.com/token",
         'client_id': client_config['client_id'],
         'client_secret': client_config['client_secret'],
-        'scopes': SCOPES
+        'scopes': SCOPES.split()
     })
+    
+    db.reference(f'temp_auth/{user_id}').delete()
 
-    # 主動發送 LINE 訊息通知使用者
+    # 主動發送教學訊息
     try:
         with ApiClient(configuration) as api_client:
             line_bot_api = MessagingApi(api_client)
-            welcome_text = "🎊 授權成功！現在您可以開始記帳了。\n\n📍 格式：項目 金額\n範例：午餐 120"
-            line_bot_api.push_message(PushMessageRequest(
-                to=user_id, 
-                messages=[TextMessage(text=welcome_text)]
-            ))
-    except Exception as e:
-        print(f"Push Message Error: {e}")
+            welcome_text = "🎊 授權成功！現在您可以開始記帳了。\n\n📍 格式：項目 金額\n範例：早餐 80"
+            line_bot_api.push_message(PushMessageRequest(to=user_id, messages=[TextMessage(text=welcome_text)]))
+    except: pass
 
-    return '<h1 style="text-align:center;padding-top:50px;font-family:sans-serif;color:#00B900;">✅ 授權成功！請回到 LINE</h1>'
+    return """
+    <div style="font-family: sans-serif; text-align: center; padding: 50px;">
+        <h1 style="color: #00B900;">✅ 授權成功！</h1>
+        <p>請回到 LINE 聊天室，我已經把教學傳給您了。</p>
+    </div>
+    """
 
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
@@ -126,13 +144,12 @@ def handle_message(event):
 
     if not user_data or 'refresh_token' not in user_data:
         auth_link = f"{RENDER_URL}/authorize/{user_id}?openExternalBrowser=1"
-        reply_text = f"歡迎使用！請先點擊連結授權您的 Google 帳號：\n{auth_link}"
+        reply_text = f"歡迎！請先授權 Google 帳號以建立記帳本：\n{auth_link}"
     else:
         msg = event.message.text.split()
         if len(msg) == 2 and msg[1].isdigit():
             item, price = msg[0], msg[1]
             try:
-                # 重新建立憑證用於讀取 Sheet
                 creds = Credentials(
                     token=user_data['token'],
                     refresh_token=user_data['refresh_token'],
@@ -170,9 +187,9 @@ def handle_message(event):
                 reply_text = f"✅ 已紀錄：{item} ${price}"
             except Exception as e:
                 print(f"Record Error: {e}")
-                reply_text = "⚠️ 紀錄失敗，請重新點擊授權連結。"
+                reply_text = "⚠️ 紀錄失敗，請重新授權。"
         else:
-            reply_text = "格式：項目 金額（例：早餐 80）"
+            reply_text = "格式：項目 金額（例如：便當 100）"
 
     with ApiClient(configuration) as api_client:
         line_bot_api = MessagingApi(api_client)
