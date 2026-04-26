@@ -72,6 +72,11 @@ def authorize(user_id):
     )
     return redirect(auth_url)
 
+@app.route("/")
+def home():
+    # 當 Cron-job.org 訪問這裡時，會看到這行字，並收到 200 成功代碼
+    return "Bot is running and staying awake!"
+
 @app.route("/oauth2callback")
 def oauth2callback():
     code = request.args.get('code')
