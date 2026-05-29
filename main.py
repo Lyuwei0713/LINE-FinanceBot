@@ -16,6 +16,9 @@ from datetime import datetime
 
 app = Flask(__name__)
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
+# 🚀 強制刪除 Render 伺服器硬碟裡可能殘留的過期 Token 檔案
+if os.path.exists('token.json'):
+    os.remove('token.json')
 
 # --- 1. 初始化 Firebase (從環境變數讀取 JSON 字串) ---
 if not firebase_admin._apps:
