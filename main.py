@@ -33,7 +33,7 @@ LINE_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
 # LINE_SECRET = os.environ.get('LINE_CHANNEL_SECRET')
 
 # 改成這樣（單引號裡面直接貼上你的 Channel Secret）：
-LINE_SECRET = 'f73eb030318f5abb7ecbcdab8fa20d6f'
+LINE_SECRET = 'e4e8bd2447bb5c402daa39bf2234e1e6'
 RENDER_URL = os.environ.get('RENDER_URL')
 G_CONFIG_STR = os.environ.get('G_CLIENT_SECRET_JSON')
 
