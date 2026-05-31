@@ -149,49 +149,109 @@ def handle_message(event):
         auth_link = f"{RENDER_URL}/authorize/{user_id}?openExternalBrowser=1"
         reply_text = f"歡迎！請先授權：\n{auth_link}"
     else:
-        msg = event.message.text.split()
-        if len(msg) == 2 and msg[1].isdigit():
-            item, price = msg[0], msg[1]
-            try:
-                creds = Credentials(
-                    token=user_data['token'],
-                    refresh_token=user_data['refresh_token'],
-                    token_uri=user_data['token_uri'],
-                    client_id=user_data['client_id'],
-                    client_secret=user_data['client_secret'],
-                    scopes=user_data['scopes']
+        user_text = event.message.text.strip()
+        msg = user_text.split()
+        
+        try:
+            # 1. 【核心上提】統一在這裡建立 Google API 連線
+            # 這樣後面的「記帳」和「查財報」都能共用這組連線
+            creds = Credentials(
+                token=user_data['token'],
+                refresh_token=user_data['refresh_token'],
+                token_uri=user_data['token_uri'],
+                client_id=user_data['client_id'],
+                client_secret=user_data['client_secret'],
+                scopes=user_data['scopes']
+            )
+            drive_service = build('drive', 'v3', credentials=creds)
+            sheets_service = build('sheets', 'v4', credentials=creds)
+            
+            # 2. 取得或自動建立試算表 (保留你原本超棒的邏輯！)
+            spreadsheet_id = user_data.get('spreadsheet_id')
+            if not spreadsheet_id:
+                results = drive_service.files().list(q="name='LINE_Finance_記帳本' and mimeType='application/vnd.google-apps.spreadsheet'", spaces='drive').execute()
+                files = results.get('files', [])
+                if files:
+                    spreadsheet_id = files[0]['id']
+                else:
+                    spreadsheet = sheets_service.spreadsheets().create(body={'properties': {'title': 'LINE_Finance_記帳本'}}, fields='spreadsheetId').execute()
+                    spreadsheet_id = spreadsheet.get('spreadsheetId')
+                    
+                    # 💡 注意這裡：我幫你多加了一個「分類」的欄位
+                    sheets_service.spreadsheets().values().append(
+                        spreadsheetId=spreadsheet_id, range="A1",
+                        valueInputOption="USER_ENTERED",
+                        body={'values': [["日期", "分類", "項目", "金額"]]}
+                    ).execute()
+                db.reference(f'users/{user_id}').update({'spreadsheet_id': spreadsheet_id})
+
+            # ==========================================
+            # 功能 A：產出專屬微型損益表
+            # ==========================================
+            if user_text == "本月財報":
+                # 從 A 欄抓到 D 欄
+                result = sheets_service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range='A:D').execute()
+                values = result.get('values', [])
+                
+                total_revenue = 0
+                total_expense = 0
+                
+                for row in values[1:]: # 迴圈跳過第一行的標題列
+                    if len(row) >= 4:
+                        amount = int(row[3])
+                        if row[1] == "營業收入":
+                            total_revenue += amount
+                        else:
+                            total_expense += amount
+                            
+                net_income = total_revenue - total_expense
+                
+                # 加上一點二次元顏文字，保持好心情 w
+                reply_text = (
+                    "📊 【FinanceBot 財務報表】\n"
+                    "(*¯︶¯*) 這是您目前的損益結算：\n"
+                    "────────────────\n"
+                    f"🔹 營業收入： ${total_revenue:,}\n"
+                    f"🔻 營業費用： ${total_expense:,}\n"
+                    "────────────────\n"
+                    f"✨ 本期淨利： ${net_income:,}"
                 )
-                drive_service = build('drive', 'v3', credentials=creds)
-                sheets_service = build('sheets', 'v4', credentials=creds)
 
-                spreadsheet_id = user_data.get('spreadsheet_id')
-                if not spreadsheet_id:
-                    results = drive_service.files().list(q="name='LINE_Finance_記帳本' and mimeType='application/vnd.google-apps.spreadsheet'", spaces='drive').execute()
-                    files = results.get('files', [])
-                    if files:
-                        spreadsheet_id = files[0]['id']
-                    else:
-                        spreadsheet = sheets_service.spreadsheets().create(body={'properties': {'title': 'LINE_Finance_記帳本'}}, fields='spreadsheetId').execute()
-                        spreadsheet_id = spreadsheet.get('spreadsheetId')
-                        sheets_service.spreadsheets().values().append(
-                            spreadsheetId=spreadsheet_id, range="A1",
-                            valueInputOption="USER_ENTERED",
-                            body={'values': [["日期", "項目", "金額"]]}
-                        ).execute()
-                    db.reference(f'users/{user_id}').update({'spreadsheet_id': spreadsheet_id})
-
+            # ==========================================
+            # 功能 B：極速記帳與自動分類
+            # ==========================================
+            elif len(msg) == 2 and msg[1].isdigit():
+                item, price = msg[0], int(msg[1])
                 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                
+                # 自動分類邏輯 (可以自己隨時新增關鍵字喔！)
+                category = "其他費用"
+                if item in ["午餐", "晚餐", "早餐", "飲料", "便當", "外送"]:
+                    category = "伙食費"
+                elif item in ["捷運", "公車", "高鐵", "計程車", "加油"]:
+                    category = "交通費"
+                elif item in ["薪水", "接案", "獎金"]:
+                    category = "營業收入"
+                    
                 sheets_service.spreadsheets().values().append(
                     spreadsheetId=spreadsheet_id, range="A1",
                     valueInputOption="USER_ENTERED",
-                    body={'values': [[now, item, price]]}
+                    # 💡 注意這裡：寫入時把 category 塞進第二個位置
+                    body={'values': [[now, category, item, price]]}
                 ).execute()
-                reply_text = f"✅ 已紀錄：{item} ${price}"
-            except Exception as e:
-                reply_text = "⚠️ 紀錄失敗，請重新授權。"
-        else:
-            reply_text = "格式：項目 金額（例如：便當 100）"
+                reply_text = f"✅ 已紀錄：[{category}] {item} ${price}"
 
+            # ==========================================
+            # 例外處理：防呆提示
+            # ==========================================
+            else:
+                reply_text = "格式錯誤！\n記帳請輸入：項目 金額 (例：便當 100)\n查詢請輸入：本月財報"
+                
+        except Exception as e:
+            reply_text = f"⚠️ 系統發生錯誤：{e}"
+            
+    # ------ 下面保留你原本的回傳程式碼 ------
+    # with ApiClient(configuration) as api_client:
     with ApiClient(configuration) as api_client:
         MessagingApi(api_client).reply_message(ReplyMessageRequest(
             reply_token=event.reply_token,
