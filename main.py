@@ -42,18 +42,28 @@ SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/
 
 @app.route("/callback", methods=['POST'])
 def callback():
+    # 1. 取得 LINE 帶過來的簽章
     signature = request.headers.get('X-Line-Signature')
-    
-    # 1. 拿取最原始、完全沒被 Flask 動過的 bytes 資料
+    if not signature:
+        print("Webhook Error: Missing X-Line-Signature header.")
+        abort(400)
+        
+    # 2. 獲取最原始的二進位 Bytes，不帶任何參數，完全不讓 Flask 提前解析
     body_bytes = request.get_data()
     
     try:
-        # 2. 將 bytes 解碼成 utf-8 字串再丟給 handler
+        # 💡 重點：linebot.v3 的 WebhookHandler 其實需要的是 UTF-8 解碼後的「純字串」
+        # 但我們必須確保它是用最乾淨的方式轉型成 string 後丟進去
         body_str = body_bytes.decode('utf-8')
+        
+        # 3. 丟給 LINE 驗證
         handler.handle(body_str, signature)
+        
     except Exception as e:
-        print(f"Webhook Error: {e}")
+        # 這裡會印出真正的詳細錯誤原因
+        print(f"Webhook Error during handle: {e}")
         abort(400)
+        
     return 'OK'
 
 @app.route("/authorize/<user_id>")
