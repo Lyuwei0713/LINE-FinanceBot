@@ -40,28 +40,26 @@ configuration = Configuration(access_token=LINE_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_SECRET)
 SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets'
 
+import traceback  # 確保這行有加在 main.py 的最上方（import 區塊）
+
 @app.route("/callback", methods=['POST'])
 def callback():
-    # 1. 取得 LINE 帶過來的簽章
     signature = request.headers.get('X-Line-Signature')
-    if not signature:
-        print("Webhook Error: Missing X-Line-Signature header.")
-        abort(400)
-        
-    # 2. 獲取最原始的二進位 Bytes，不帶任何參數，完全不讓 Flask 提前解析
-    body_bytes = request.get_data()
+    body = request.get_data()
     
     try:
-        # 💡 重點：linebot.v3 的 WebhookHandler 其實需要的是 UTF-8 解碼後的「純字串」
-        # 但我們必須確保它是用最乾淨的方式轉型成 string 後丟進去
-        body_str = body_bytes.decode('utf-8')
-        
-        # 3. 丟給 LINE 驗證
-        handler.handle(body_str, signature)
+        # 這裡會觸發你寫在下方的 @handler.add 邏輯
+        handler.handle(body.decode('utf-8'), signature)
         
     except Exception as e:
-        # 這裡會印出真正的詳細錯誤原因
-        print(f"Webhook Error during handle: {e}")
+        # 這次我們強制把底層的 Traceback 全部印出來！
+        error_trace = traceback.format_exc()
+        print("====== 案發現場開始 ======")
+        print(f"錯誤類型: {type(e)}")
+        print(f"錯誤訊息: {e}")
+        print(f"詳細追蹤:\n{error_trace}")
+        print("====== 案發現場結束 ======")
+        
         abort(400)
         
     return 'OK'
