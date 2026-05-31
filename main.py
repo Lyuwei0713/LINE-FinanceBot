@@ -148,7 +148,7 @@ def handle_message(event):
     # 1. 檢查是否已經綁定 Google 帳號
     if not user_data or 'refresh_token' not in user_data:
         auth_link = f"{RENDER_URL}/authorize/{user_id}?openExternalBrowser=1"
-        reply_text = f"歡迎！請先授權：\n{auth_link}"
+        reply_text = f"歡迎使用 FinanceBot！✨\n請先點擊下方連結完成 Google 帳號授權，才能開啟智慧記帳功能喔：\n{auth_link}"
     else:
         user_text = event.message.text.strip()
         msg = user_text.split()
@@ -186,9 +186,28 @@ def handle_message(event):
                 db.reference(f'users/{user_id}').update({'spreadsheet_id': spreadsheet_id})
 
             # ==========================================
+            # 新增功能：Bot 功能清單導覽提示
+            # ==========================================
+            if user_text in ["功能", "幫助", "help", "指令"]:
+                reply_text = (
+                    "🌟 【FinanceBot 功能指令大全】\n"
+                    "(*¯︶¯*) 主人～我是您的專屬財務管家！目前我有以下超棒的功能喔：\n\n"
+                    "📝 1. 極速記帳（自動分類會計科目）\n"
+                    "👉 輸入格式：[項目] [金額]\n"
+                    "💡 範例：`便當 100` 或 `薪水 50000`\n"
+                    "（系統會聰明地自動歸類成伙食費、交通費、營業收入等）\n\n"
+                    "📊 2. 本月財報動態生成\n"
+                    "👉 輸入關鍵字：`本月財報`\n"
+                    "（我會幫您動態結算當月的營業收入、營業費用，並產出專業的微型損益表！）\n\n"
+                    "⚠️ 3. 一鍵指令重置/升級帳本\n"
+                    "👉 輸入關鍵字：`重置帳本`\n"
+                    "（自動清空試算表舊數據，並重新格式化為最新的『日期、分類、項目、金額』4 欄結構！）"
+                )
+
+            # ==========================================
             # 功能 A：產出專屬微型損益表
             # ==========================================
-            if user_text == "本月財報":
+            elif user_text == "本月財報":
                 # 撈取整張表格前四個欄位
                 result = sheets_service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range='A:D').execute()
                 values = result.get('values', [])
@@ -217,7 +236,7 @@ def handle_message(event):
                 )
 
             # ==========================================
-            # 功能 B：一鍵重置/升級帳本格式
+            # 功能 B：指令重置試算表功能 (自動化手動欄位步驟)
             # ==========================================
             elif user_text == "重置帳本":
                 # 清除範圍 A 到 D 欄
@@ -226,7 +245,7 @@ def handle_message(event):
                     range='A:D'
                 ).execute()
                 
-                # 重新寫入 4 欄標題
+                # 重新寫入最新的 4 欄標題
                 sheets_service.spreadsheets().values().append(
                     spreadsheetId=spreadsheet_id, range="A1",
                     valueInputOption="USER_ENTERED",
@@ -261,10 +280,16 @@ def handle_message(event):
                 reply_text = f"✅ 已紀錄：[{category}] {item} ${price}"
 
             # ==========================================
-            # 例外處理：防呆提示
+            # 例外處理：防呆與主動提示功能清單
             # ==========================================
             else:
-                reply_text = "格式錯誤！\n📝 記帳請輸入：項目 金額 (例：便當 100)\n📊 查詢請輸入：本月財報\n⚠️ 格式化請輸入：重置帳本"
+                reply_text = (
+                    "主人，我看不懂這個指令 w\n\n"
+                    "💡 請輸入『功能』或『幫助』查看完整指令清單！\n"
+                    "📝 記帳請打：項目 金額 (例：便當 100)\n"
+                    "📊 查損益表請打：本月財報\n"
+                    "⚠️ 重置帳本請打：重置帳本"
+                )
                 
         except Exception as e:
             reply_text = f"⚠️ 系統發生錯誤：{e}"
