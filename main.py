@@ -43,9 +43,9 @@ SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/
 @app.route("/callback", methods=['POST'])
 def callback():
     signature = request.headers.get('X-Line-Signature')
-    body = request.get_data(as_text=True)
+    body = request.get_data()
     try:
-        handler.handle(body, signature)
+        handler.handle(body.decode('utf-8'), signature)
     except Exception as e:
         print(f"Webhook Error: {e}")
         abort(400)
