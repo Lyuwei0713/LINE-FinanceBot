@@ -145,6 +145,7 @@ def handle_message(event):
     user_id = event.source.user_id
     user_data = db.reference(f'users/{user_id}').get()
 
+    # 1. 檢查是否已經綁定 Google 帳號
     if not user_data or 'refresh_token' not in user_data:
         auth_link = f"{RENDER_URL}/authorize/{user_id}?openExternalBrowser=1"
         reply_text = f"歡迎！請先授權：\n{auth_link}"
@@ -153,8 +154,7 @@ def handle_message(event):
         msg = user_text.split()
         
         try:
-            # 1. 【核心上提】統一在這裡建立 Google API 連線
-            # 這樣後面的「記帳」和「查財報」都能共用這組連線
+            # 2. 建立 Google API 連線 (財報與記帳共用)
             creds = Credentials(
                 token=user_data['token'],
                 refresh_token=user_data['refresh_token'],
@@ -166,7 +166,7 @@ def handle_message(event):
             drive_service = build('drive', 'v3', credentials=creds)
             sheets_service = build('sheets', 'v4', credentials=creds)
             
-            # 2. 取得或自動建立試算表 (保留你原本超棒的邏輯！)
+            # 3. 取得或自動建立試算表
             spreadsheet_id = user_data.get('spreadsheet_id')
             if not spreadsheet_id:
                 results = drive_service.files().list(q="name='LINE_Finance_記帳本' and mimeType='application/vnd.google-apps.spreadsheet'", spaces='drive').execute()
@@ -177,7 +177,7 @@ def handle_message(event):
                     spreadsheet = sheets_service.spreadsheets().create(body={'properties': {'title': 'LINE_Finance_記帳本'}}, fields='spreadsheetId').execute()
                     spreadsheet_id = spreadsheet.get('spreadsheetId')
                     
-                    # 💡 注意這裡：我幫你多加了一個「分類」的欄位
+                    # 初始化 4 欄標題
                     sheets_service.spreadsheets().values().append(
                         spreadsheetId=spreadsheet_id, range="A1",
                         valueInputOption="USER_ENTERED",
@@ -189,14 +189,14 @@ def handle_message(event):
             # 功能 A：產出專屬微型損益表
             # ==========================================
             if user_text == "本月財報":
-                # 從 A 欄抓到 D 欄
+                # 撈取整張表格前四個欄位
                 result = sheets_service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range='A:D').execute()
                 values = result.get('values', [])
                 
                 total_revenue = 0
                 total_expense = 0
                 
-                for row in values[1:]: # 迴圈跳過第一行的標題列
+                for row in values[1:]: # 跳過第一行標題
                     if len(row) >= 4:
                         amount = int(row[3])
                         if row[1] == "營業收入":
@@ -206,7 +206,6 @@ def handle_message(event):
                             
                 net_income = total_revenue - total_expense
                 
-                # 加上一點二次元顏文字，保持好心情 w
                 reply_text = (
                     "📊 【FinanceBot 財務報表】\n"
                     "(*¯︶¯*) 這是您目前的損益結算：\n"
@@ -218,13 +217,32 @@ def handle_message(event):
                 )
 
             # ==========================================
-            # 功能 B：極速記帳與自動分類
+            # 功能 B：一鍵重置/升級帳本格式
+            # ==========================================
+            elif user_text == "重置帳本":
+                # 清除範圍 A 到 D 欄
+                sheets_service.spreadsheets().values().clear(
+                    spreadsheetId=spreadsheet_id,
+                    range='A:D'
+                ).execute()
+                
+                # 重新寫入 4 欄標題
+                sheets_service.spreadsheets().values().append(
+                    spreadsheetId=spreadsheet_id, range="A1",
+                    valueInputOption="USER_ENTERED",
+                    body={'values': [["日期", "分類", "項目", "金額"]]}
+                ).execute()
+                
+                reply_text = "✨ 系統重置完畢！\n(*¯︶¯*) 帳本已升級為全新 4 欄格式，舊資料已清除。\n現在可以開始記帳囉！"
+
+            # ==========================================
+            # 功能 C：極速記帳與自動分類
             # ==========================================
             elif len(msg) == 2 and msg[1].isdigit():
                 item, price = msg[0], int(msg[1])
                 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 
-                # 自動分類邏輯 (可以自己隨時新增關鍵字喔！)
+                # 自動分類邏輯
                 category = "其他費用"
                 if item in ["午餐", "晚餐", "早餐", "飲料", "便當", "外送"]:
                     category = "伙食費"
@@ -233,30 +251,29 @@ def handle_message(event):
                 elif item in ["薪水", "接案", "獎金"]:
                     category = "營業收入"
                     
+                # 寫入 Google Sheets
                 sheets_service.spreadsheets().values().append(
                     spreadsheetId=spreadsheet_id, range="A1",
                     valueInputOption="USER_ENTERED",
-                    # 💡 注意這裡：寫入時把 category 塞進第二個位置
                     body={'values': [[now, category, item, price]]}
                 ).execute()
+                
                 reply_text = f"✅ 已紀錄：[{category}] {item} ${price}"
 
             # ==========================================
             # 例外處理：防呆提示
             # ==========================================
             else:
-                reply_text = "格式錯誤！\n記帳請輸入：項目 金額 (例：便當 100)\n查詢請輸入：本月財報"
+                reply_text = "格式錯誤！\n📝 記帳請輸入：項目 金額 (例：便當 100)\n📊 查詢請輸入：本月財報\n⚠️ 格式化請輸入：重置帳本"
                 
         except Exception as e:
             reply_text = f"⚠️ 系統發生錯誤：{e}"
-            
-    # ------ 下面保留你原本的回傳程式碼 ------
-    # with ApiClient(configuration) as api_client:
+
+    # 4. 統一回傳訊息給 LINE 聊天室
     with ApiClient(configuration) as api_client:
         MessagingApi(api_client).reply_message(ReplyMessageRequest(
             reply_token=event.reply_token,
             messages=[TextMessage(text=reply_text)]
         ))
-
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=10000)
