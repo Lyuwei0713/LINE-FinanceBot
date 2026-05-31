@@ -43,9 +43,14 @@ SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/
 @app.route("/callback", methods=['POST'])
 def callback():
     signature = request.headers.get('X-Line-Signature')
-    body = request.get_data()
+    
+    # 1. 拿取最原始、完全沒被 Flask 動過的 bytes 資料
+    body_bytes = request.get_data()
+    
     try:
-        handler.handle(body.decode('utf-8'), signature)
+        # 2. 將 bytes 解碼成 utf-8 字串再丟給 handler
+        body_str = body_bytes.decode('utf-8')
+        handler.handle(body_str, signature)
     except Exception as e:
         print(f"Webhook Error: {e}")
         abort(400)
