@@ -29,7 +29,11 @@ if not firebase_admin._apps:
 
 # --- 2. 設定參數 (全數從環境變數讀取) ---
 LINE_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
-LINE_SECRET = os.environ.get('LINE_CHANNEL_SECRET')
+# 請找到這行，把它原本的 os.environ.get(...) 註解掉：
+# LINE_SECRET = os.environ.get('LINE_CHANNEL_SECRET')
+
+# 改成這樣（單引號裡面直接貼上你的 Channel Secret）：
+LINE_SECRET = 'f73eb030318f5abb7ecbcdab8fa20d6f'
 RENDER_URL = os.environ.get('RENDER_URL')
 G_CONFIG_STR = os.environ.get('G_CLIENT_SECRET_JSON')
 
