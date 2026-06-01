@@ -148,7 +148,20 @@ def handle_message(event):
     # 1. 檢查是否已經綁定 Google 帳號
     if not user_data or 'refresh_token' not in user_data:
         auth_link = f"{RENDER_URL}/authorize/{user_id}?openExternalBrowser=1"
-        reply_text = f"歡迎使用 FinanceBot！✨\n請先點擊下方連結完成 Google 帳號授權，才能開啟智慧記帳功能喔：\n{auth_link}"
+        auth_link = f"{RENDER_URL}/authorize/{user_id}?openExternalBrowser=1"
+        
+        # 從這裡開始貼上，替換原本的第 151 行：
+        reply_text = (
+            "歡迎使用 FinanceBot！✨\n"
+            "請先點擊下方連結完成 Google 帳號授權，才能開啟智慧記帳功能喔：\n"
+            f"{auth_link}\n\n"
+            "⚠️ 【 授權小提示：請安心點擊 】\n"
+            "因為本系統為個人私有開發的理財管家，尚未提交給 Google 進行商業公開驗證。點擊連結時，若跳出「Google 尚未驗證這個應用程式」或「不安全」的警告畫面，請完全不用擔心！\n\n"
+            "🛠️ 請跟著以下步驟點擊即可順利開啟：\n"
+            "1️⃣ 點擊畫面左下角的【進階】(Advanced)\n"
+            "2️⃣ 點擊最下方的【前往 line-financebot.onrender.com (不安全)】\n\n"
+            "點擊後勾選允許存取 Google 試算表，就能完美開通所有智慧功能囉！"
+        )
     else:
         user_text = event.message.text.strip()
         msg = user_text.split()
