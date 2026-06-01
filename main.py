@@ -149,7 +149,17 @@ def handle_message(event):
     # 1. 檢查是否已經綁定 Google 帳號
     if not user_data or 'refresh_token' not in user_data:
         auth_link = f"{RENDER_URL}/authorize/{user_id}?openExternalBrowser=1"
-        reply_text = f"歡迎使用 FinanceBot！✨\n請先點擊下方連結完成 Google 帳號授權，才能開啟智慧記帳與財務功能喔：\n{auth_link}"
+        reply_text = (
+            "歡迎使用 FinanceBot！✨\n"
+            "請先點擊下方連結完成 Google 帳號授權，才能開啟智慧記帳功能喔：\n"
+            f"{auth_link}\n\n"
+            "⚠️ 【 授權小提示：請安心點擊 】\n"
+            "因為本系統為個人私有開發的理財管家，尚未提交給 Google 進行商業公開驗證。點擊連結時，若跳出「Google 尚未驗證這個應用程式」或「不安全」的警告畫面，請完全不用擔心！\n\n"
+            "🛠️ 請跟著以下步驟點擊即可順利開啟：\n"
+            "1️⃣ 點擊畫面左下角的【進階】(Advanced)\n"
+            "2️⃣ 點擊最下方的【前往 line-financebot.onrender.com (不安全)】\n\n"
+            "點擊後勾選允許存取 Google 試算表，就能完美開通所有智慧功能囉！"
+        )
     else:
         user_text = event.message.text.strip()
         msg = user_text.split()
@@ -167,6 +177,7 @@ def handle_message(event):
             drive_service = build('drive', 'v3', credentials=creds)
             sheets_service = build('sheets', 'v4', credentials=creds)
             
+            # 3. 取得或自動建立試算表
             spreadsheet_id = user_data.get('spreadsheet_id')
             if not spreadsheet_id:
                 results = drive_service.files().list(q="name='LINE_Finance_記帳本' and mimeType='application/vnd.google-apps.spreadsheet'", spaces='drive').execute()
@@ -176,6 +187,7 @@ def handle_message(event):
                 else:
                     spreadsheet = sheets_service.spreadsheets().create(body={'properties': {'title': 'LINE_Finance_記帳本'}}, fields='spreadsheetId').execute()
                     spreadsheet_id = spreadsheet.get('spreadsheetId')
+                    
                     sheets_service.spreadsheets().values().append(
                         spreadsheetId=spreadsheet_id, range="A1",
                         valueInputOption="USER_ENTERED",
@@ -184,7 +196,7 @@ def handle_message(event):
                 db.reference(f'users/{user_id}').update({'spreadsheet_id': spreadsheet_id})
 
             # ==========================================
-            # 功能導覽提示 (已加入股票功能說明)
+            # 功能導覽提示 
             # ==========================================
             if user_text in ["功能", "幫助", "help", "指令"]:
                 reply_text = (
@@ -192,20 +204,19 @@ def handle_message(event):
                     "(*¯︶¯*) 主人～我是您的專屬財務管家！目前我有以下功能喔：\n\n"
                     "📝 1. 極速記帳\n"
                     "👉 格式：`[項目] [金額]` (例：`便當 100`)\n\n"
-                    "📊 2. 本月財報分析\n"
-                    "👉 關鍵字：`本月財報` (自動生成微型損益表)\n\n"
-                    "📈 3. 股票行情快查 (新功能!)\n"
+                    "📊 2. 本月收支結算\n"
+                    "👉 關鍵字：`本月收支` 或 `本月財報`\n\n"
+                    "📈 3. 股票行情快查\n"
                     "👉 當天行情：`個股 [代號]` (例：`個股 2330`)\n"
-                    "👉 歷史區間：`個股 [代號] [天數]` (例：`個股 2330 5`)\n"
-                    "💡 註：台股輸入數字即可，美股請輸入代號如 `個股 AAPL`\n\n"
+                    "👉 歷史區間：`個股 [代號] [天數]` (例：`個股 2330 5`)\n\n"
                     "⚠️ 4. 一鍵重置帳本\n"
                     "👉 關鍵字：`重置帳本`"
                 )
 
-           # ==========================================
+            # ==========================================
             # 功能 A：產出日常版收支統計
             # ==========================================
-            elif user_text == "本月財報" or user_text == "本月收支":
+            elif user_text in ["本月財報", "本月收支"]:
                 result = sheets_service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range='A:D').execute()
                 values = result.get('values', [])
                 
@@ -215,7 +226,6 @@ def handle_message(event):
                 for row in values[1:]: # 跳過第一行標題
                     if len(row) >= 4:
                         amount = int(row[3])
-                        # 只要分類是「收入」就加總，其餘都算支出
                         if row[1] == "收入":
                             total_income += amount
                         else:
@@ -234,7 +244,7 @@ def handle_message(event):
                 )
 
             # ==========================================
-            # 功能 B：一鍵重置試算表
+            # 功能 B：一鍵重置帳本
             # ==========================================
             elif user_text == "重置帳本":
                 sheets_service.spreadsheets().values().clear(spreadsheetId=spreadsheet_id, range='A:D').execute()
@@ -245,22 +255,18 @@ def handle_message(event):
                 ).execute()
                 reply_text = "✨ 系統重置完畢！\n帳本已升級為全新 4 欄格式，現在可以重新記帳囉！"
 
-           # ==========================================
-            # 新功能 D：股票查詢系統 (進化版：不管有沒有空格都能抓)
+            # ==========================================
+            # 新功能 D：股票查詢系統
             # ==========================================
             elif user_text.startswith("個股"):
-                # 把 "個股" 兩個字抽掉，剩下的字串再用空白切開
-                # 這樣不管打「個股 2330 5」還是「個股2330 5」都能完美辨識！
                 stock_args = user_text.replace("個股", "").strip().split()
-                
                 if len(stock_args) >= 1:
                     ticker_input = stock_args[0].upper()
                     ticker = f"{ticker_input}.TW" if ticker_input.isdigit() else ticker_input
                     stock = yf.Ticker(ticker)
                     
-                    # 模式一：抓當天最新行情
                     if len(stock_args) == 1:
-                        hist = stock.history(period="2d") 
+                        hist = stock.history(period="2d")
                         if not hist.empty:
                             latest = hist.iloc[-1]
                             price = latest['Close']
@@ -285,7 +291,6 @@ def handle_message(event):
                         else:
                             reply_text = f"❌ 找不到股票代號【{ticker_input}】。"
 
-                    # 模式二：抓過去一段時間的歷史資訊
                     elif len(stock_args) == 2 and stock_args[1].isdigit():
                         days = int(stock_args[1])
                         hist = stock.history(period=f"{days}d")
@@ -299,14 +304,14 @@ def handle_message(event):
                             reply_text = f"❌ 找不到該天數區間的歷史資料。"
                 else:
                     reply_text = "❌ 股票查詢格式錯誤！請輸入如：『個股 2330』"
-          # ==========================================
-            # 功能 C：極速記帳與自動分類
+
+            # ==========================================
+            # 功能 C：極速記帳與自動分類 (日常用語版)
             # ==========================================
             elif len(msg) == 2 and msg[1].isdigit():
                 item, price = msg[0], int(msg[1])
                 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 
-                # 自動分類邏輯 (換成日常用語)
                 category = "其他支出"
                 if item in ["午餐", "晚餐", "早餐", "飲料", "便當", "外送"]:
                     category = "伙食費"
@@ -315,14 +320,26 @@ def handle_message(event):
                 elif item in ["薪水", "接案", "獎金", "零用錢", "股息"]:
                     category = "收入"
                     
-                # 寫入 Google Sheets
                 sheets_service.spreadsheets().values().append(
                     spreadsheetId=spreadsheet_id, range="A1",
                     valueInputOption="USER_ENTERED",
                     body={'values': [[now, category, item, price]]}
                 ).execute()
-                
                 reply_text = f"✅ 已紀錄：[{category}] {item} ${price}"
+
+            # ==========================================
+            # 例外處理：防呆提示
+            # ==========================================
+            else:
+                reply_text = (
+                    "主人，我看不懂這個指令 w\n\n"
+                    "💡 請輸入『功能』查看完整指令清單！"
+                )
+                
+        # 👇 就是這裡！這個 except 剛剛不見了，把它補回來！
+        except Exception as e:
+            reply_text = f"⚠️ 系統發生錯誤：{e}"
+
     # 4. 統一回傳訊息給 LINE 聊天室
     with ApiClient(configuration) as api_client:
         MessagingApi(api_client).reply_message(ReplyMessageRequest(
