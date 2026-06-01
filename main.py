@@ -202,29 +202,35 @@ def handle_message(event):
                     "👉 關鍵字：`重置帳本`"
                 )
 
+           # ==========================================
+            # 功能 A：產出日常版收支統計
             # ==========================================
-            # 功能 A：產出專屬微型損益表
-            # ==========================================
-            elif user_text == "本月財報":
+            elif user_text == "本月財報" or user_text == "本月收支":
                 result = sheets_service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range='A:D').execute()
                 values = result.get('values', [])
-                total_revenue, total_expense = 0, 0
-                for row in values[1:]:
+                
+                total_income = 0
+                total_expense = 0
+                
+                for row in values[1:]: # 跳過第一行標題
                     if len(row) >= 4:
                         amount = int(row[3])
-                        if row[1] == "營業收入":
-                            total_revenue += amount
+                        # 只要分類是「收入」就加總，其餘都算支出
+                        if row[1] == "收入":
+                            total_income += amount
                         else:
                             total_expense += amount
-                net_income = total_revenue - total_expense
+                            
+                net_balance = total_income - total_expense
+                
                 reply_text = (
-                    "📊 【FinanceBot 財務報表】\n"
-                    "(*¯︶¯*) 這是您目前的損益結算：\n"
+                    "📊 【本月收支報告】\n"
+                    "(*¯︶¯*) 這是您這個月的理財狀況：\n"
                     "────────────────\n"
-                    f"🔹 營業收入： ${total_revenue:,}\n"
-                    f"🔻 營業費用： ${total_expense:,}\n"
+                    f"💰 總收入： ${total_income:,}\n"
+                    f"💸 總支出： ${total_expense:,}\n"
                     "────────────────\n"
-                    f"✨ 本期淨利： ${net_income:,}"
+                    f"✨ 本月結餘： ${net_balance:,}"
                 )
 
             # ==========================================
@@ -293,42 +299,30 @@ def handle_message(event):
                             reply_text = f"❌ 找不到該天數區間的歷史資料。"
                 else:
                     reply_text = "❌ 股票查詢格式錯誤！請輸入如：『個股 2330』"
-            # ==========================================
+          # ==========================================
             # 功能 C：極速記帳與自動分類
             # ==========================================
             elif len(msg) == 2 and msg[1].isdigit():
                 item, price = msg[0], int(msg[1])
                 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                category = "其他費用"
+                
+                # 自動分類邏輯 (換成日常用語)
+                category = "其他支出"
                 if item in ["午餐", "晚餐", "早餐", "飲料", "便當", "外送"]:
                     category = "伙食費"
                 elif item in ["捷運", "公車", "高鐵", "計程車", "加油"]:
                     category = "交通費"
-                elif item in ["薪水", "接案", "獎金"]:
-                    category = "營業收入"
+                elif item in ["薪水", "接案", "獎金", "零用錢", "股息"]:
+                    category = "收入"
                     
+                # 寫入 Google Sheets
                 sheets_service.spreadsheets().values().append(
                     spreadsheetId=spreadsheet_id, range="A1",
                     valueInputOption="USER_ENTERED",
                     body={'values': [[now, category, item, price]]}
                 ).execute()
-                reply_text = f"✅ 已紀錄：[{category}] {item} ${price}"
-
-            # ==========================================
-            # 例外處理：防呆提示
-            # ==========================================
-            else:
-                reply_text = (
-                    "主人，我看不懂這個指令 w\n\n"
-                    "💡 請輸入『功能』查看完整指令清單！\n"
-                    "📝 記帳：項目 金額 (例：便當 100)\n"
-                    "📊 查行情：個股 代號 (例：個股 2330)\n"
-                    "📈 查歷史：個股 代號 天數 (例：個股 2330 5)"
-                )
                 
-        except Exception as e:
-            reply_text = f"⚠️ 系統發生錯誤：{e}"
-
+                reply_text = f"✅ 已紀錄：[{category}] {item} ${price}"
     # 4. 統一回傳訊息給 LINE 聊天室
     with ApiClient(configuration) as api_client:
         MessagingApi(api_client).reply_message(ReplyMessageRequest(
