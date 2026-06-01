@@ -255,19 +255,32 @@ def handle_message(event):
                 ).execute()
                 reply_text = "✨ 系統重置完畢！\n帳本已升級為全新 4 欄格式，現在可以重新記帳囉！"
 
-            # ==========================================
-            # 新功能 D：股票查詢系統
+           # ==========================================
+            # 新功能 D：股票查詢系統 (支援上市 .TW 與上櫃 .TWO 自動切換)
             # ==========================================
             elif user_text.startswith("個股"):
                 stock_args = user_text.replace("個股", "").strip().split()
                 if len(stock_args) >= 1:
                     ticker_input = stock_args[0].upper()
-                    ticker = f"{ticker_input}.TW" if ticker_input.isdigit() else ticker_input
-                    stock = yf.Ticker(ticker)
                     
-                    if len(stock_args) == 1:
-                        hist = stock.history(period="2d")
+                    # 決定要抓幾天的資料 (預設 2 天用來算今日漲跌幅)
+                    days = 2 if len(stock_args) == 1 else int(stock_args[1])
+                    
+                    # 雙引擎搜尋：如果是純數字，同時準備好上市(.TW)和上櫃(.TWO)的代號
+                    tickers_to_try = [f"{ticker_input}.TW", f"{ticker_input}.TWO"] if ticker_input.isdigit() else [ticker_input]
+                    
+                    hist = None
+                    # 開始自動嘗試，只要有其中一個抓得到資料，就馬上鎖定！
+                    for t in tickers_to_try:
+                        stock = yf.Ticker(t)
+                        hist = stock.history(period=f"{days}d")
                         if not hist.empty:
+                            break # 找到了就跳出迴圈
+                            
+                    # 如果有抓到資料，就開始產出報表
+                    if hist is not None and not hist.empty:
+                        # 模式一：當天行情
+                        if len(stock_args) == 1:
                             latest = hist.iloc[-1]
                             price = latest['Close']
                             if len(hist) > 1:
@@ -288,22 +301,17 @@ def handle_message(event):
                                 f"────────────────\n"
                                 f"📅 資料時間：{hist.index[-1].strftime('%Y-%m-%d')}"
                             )
-                        else:
-                            reply_text = f"❌ 找不到股票代號【{ticker_input}】。"
-
-                    elif len(stock_args) == 2 and stock_args[1].isdigit():
-                        days = int(stock_args[1])
-                        hist = stock.history(period=f"{days}d")
-                        if not hist.empty:
+                        # 模式二：歷史資料
+                        elif len(stock_args) == 2:
                             reply_text = f"📊 【{ticker_input} 過去 {days} 天歷史資訊】\n────────────────\n"
                             for date, row in reversed(list(hist.iterrows())):
                                 date_str = date.strftime('%m/%d')
                                 reply_text += f"📅 {date_str} | 收盤: ${row['Close']:.2f} | 總量: {int(row['Volume'])/1000:,.0f}K 股\n"
                             reply_text += "────────────────\n💡 註：成交量 K 代表千股。"
-                        else:
-                            reply_text = f"❌ 找不到該天數區間的歷史資料。"
+                    else:
+                        reply_text = f"❌ 找不到股票代號【{ticker_input}】。請確認代號是否正確。"
                 else:
-                    reply_text = "❌ 股票查詢格式錯誤！請輸入如：『個股 2330』"
+                    reply_text = "❌ 股票查詢格式錯誤！請輸入如：『個股 2330』或『個股 3105』"
 
             # ==========================================
             # 功能 C：極速記帳與自動分類 (日常用語版)
