@@ -239,61 +239,60 @@ def handle_message(event):
                 ).execute()
                 reply_text = "✨ 系統重置完畢！\n帳本已升級為全新 4 欄格式，現在可以重新記帳囉！"
 
+           # ==========================================
+            # 新功能 D：股票查詢系統 (進化版：不管有沒有空格都能抓)
             # ==========================================
-            # 新功能 D：股票查詢系統 (當天行情 / 一段時間歷史)
-            # ==========================================
-            elif len(msg) >= 2 and msg[0] == "個股":
-                ticker_input = msg[1].upper()
-                # 自動防呆：如果使用者輸入純數字，自動補上台股的字尾 ".TW"
-                ticker = f"{ticker_input}.TW" if ticker_input.isdigit() else ticker_input
+            elif user_text.startswith("個股"):
+                # 把 "個股" 兩個字抽掉，剩下的字串再用空白切開
+                # 這樣不管打「個股 2330 5」還是「個股2330 5」都能完美辨識！
+                stock_args = user_text.replace("個股", "").strip().split()
                 
-                stock = yf.Ticker(ticker)
-                
-                # 模式一：只輸入「個股 2330」-> 抓當天最新行情
-                if len(msg) == 2:
-                    hist = stock.history(period="2d") # 抓兩天資料用來計算漲跌
-                    if not hist.empty:
-                        latest = hist.iloc[-1]
-                        price = latest['Close']
-                        
-                        # 計算漲跌幅
-                        if len(hist) > 1:
-                            prev_close = hist.iloc[-2]['Close']
-                            change = price - prev_close
-                            change_percent = (change / prev_close) * 100
+                if len(stock_args) >= 1:
+                    ticker_input = stock_args[0].upper()
+                    ticker = f"{ticker_input}.TW" if ticker_input.isdigit() else ticker_input
+                    stock = yf.Ticker(ticker)
+                    
+                    # 模式一：抓當天最新行情
+                    if len(stock_args) == 1:
+                        hist = stock.history(period="2d") 
+                        if not hist.empty:
+                            latest = hist.iloc[-1]
+                            price = latest['Close']
+                            if len(hist) > 1:
+                                prev_close = hist.iloc[-2]['Close']
+                                change = price - prev_close
+                                change_percent = (change / prev_close) * 100
+                            else:
+                                change, change_percent = 0.0, 0.0
+                            sign = "▲" if change > 0 else "▼" if change < 0 else "─"
+                            reply_text = (
+                                f"📈 【個股當日行情 - {ticker_input}】\n"
+                                f"────────────────\n"
+                                f"🔹 當前收盤：${price:.2f}\n"
+                                f"🔸 今日漲跌：{sign} {abs(change):.2f} ({change_percent:+.2f}%)\n"
+                                f"🔹 今日最高：${latest['High']:.2f}\n"
+                                f"🔸 今日最低：${latest['Low']:.2f}\n"
+                                f"🔹 成交股數：{int(latest['Volume']):,} 股\n"
+                                f"────────────────\n"
+                                f"📅 資料時間：{hist.index[-1].strftime('%Y-%m-%d')}"
+                            )
                         else:
-                            change, change_percent = 0.0, 0.0
-                            
-                        sign = "▲" if change > 0 else "▼" if change < 0 else "─"
-                        
-                        reply_text = (
-                            f"📈 【個股當日行情 - {ticker_input}】\n"
-                            f"────────────────\n"
-                            f"🔹 當前收盤：${price:.2f}\n"
-                            f"🔸 今日漲跌：{sign} {abs(change):.2f} ({change_percent:+.2f}%)\n"
-                            f"🔹 今日最高：${latest['High']:.2f}\n"
-                            f"🔸 今日最低：${latest['Low']:.2f}\n"
-                            f"🔹 成交股數：{int(latest['Volume']):,} 股\n"
-                            f"────────────────\n"
-                            f"📅 資料時間：{hist.index[-1].strftime('%Y-%m-%d')}"
-                        )
-                    else:
-                        reply_text = f"❌ 找不到股票代號【{ticker_input}】。如果是台股請輸入代號數字即可（如：個股 2330）。"
+                            reply_text = f"❌ 找不到股票代號【{ticker_input}】。"
 
-                # 模式二：輸入「個股 2330 5」-> 抓過去一段時間（例如 5 天）的歷史資訊
-                elif len(msg) == 3 and msg[2].isdigit():
-                    days = int(msg[2])
-                    hist = stock.history(period=f"{days}d")
-                    if not hist.empty:
-                        reply_text = f"📊 【{ticker_input} 過去 {days} 天歷史資訊】\n────────────────\n"
-                        # 倒序排列，把最新日期放在最上面
-                        for date, row in reversed(list(hist.iterrows())):
-                            date_str = date.strftime('%m/%d')
-                            reply_text += f"📅 {date_str} | 收盤: ${row['Close']:.2f} | 總量: {int(row['Volume'])/1000:,.0f}K 股\n"
-                        reply_text += "────────────────\n💡 註：成交量 K 代表千股。"
-                    else:
-                        reply_text = f"❌ 找不到該天數區間的歷史資料。"
-
+                    # 模式二：抓過去一段時間的歷史資訊
+                    elif len(stock_args) == 2 and stock_args[1].isdigit():
+                        days = int(stock_args[1])
+                        hist = stock.history(period=f"{days}d")
+                        if not hist.empty:
+                            reply_text = f"📊 【{ticker_input} 過去 {days} 天歷史資訊】\n────────────────\n"
+                            for date, row in reversed(list(hist.iterrows())):
+                                date_str = date.strftime('%m/%d')
+                                reply_text += f"📅 {date_str} | 收盤: ${row['Close']:.2f} | 總量: {int(row['Volume'])/1000:,.0f}K 股\n"
+                            reply_text += "────────────────\n💡 註：成交量 K 代表千股。"
+                        else:
+                            reply_text = f"❌ 找不到該天數區間的歷史資料。"
+                else:
+                    reply_text = "❌ 股票查詢格式錯誤！請輸入如：『個股 2330』"
             # ==========================================
             # 功能 C：極速記帳與自動分類
             # ==========================================
