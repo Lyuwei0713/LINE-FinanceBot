@@ -145,83 +145,86 @@ def liff_page():
         <title>個股快速查詢</title>
         <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
         <style>
-           <body>
-    <div class="container">
-        <h3>📈 個股快速查詢</h3>
-        
-        <input type="text" id="stockCode" placeholder="輸入代碼 (例：2330 或 AAPL)" style="text-transform: uppercase;">
-        <br>
-        
-        <input type="number" id="days" placeholder="查詢天數 (選填，預設為當日)">
-        <br>
-        
-        <button onclick="sendStockCommand()">立即查詢</button>
-    </div>
-
-    <script>
-        liff.init({ liffId: "2010266740-hdqBlZ15" }).catch(err => console.error(err));
-
-        function sendStockCommand() {
-            // 抓取兩個輸入框的值
-            const code = document.getElementById('stockCode').value.trim().toUpperCase();
-            const days = document.getElementById('days').value.trim();
-            
-            if (code) {
-                // 自動幫使用者把「代號」跟「天數」用空格組合起來
-                let commandText = '個股 ' + code;
-                if (days) {
-                    commandText += ' ' + days;
-                }
-
-                // 透過 LINE 發送隱藏指令
-                liff.sendMessages([{
-                    type: 'text',
-                    text: commandText
-                }]).then(() => {
-                    // 成功後自動關閉視窗
-                    liff.closeWindow();
-                }).catch(err => {
-                    alert("傳送失敗，請確認網路狀態：" + err);
-                });
-            } else {
-                alert("請先輸入股票代碼！");
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+                background-color: #f4f5f7;
+                padding: 20px;
+                text-align: center;
             }
-        }
-    </script>
-</body>
+            .container {
+                background: white;
+                padding: 30px 20px;
+                border-radius: 12px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+                margin-top: 10px;
+            }
+            h3 { color: #333; margin-bottom: 20px; font-size: 18px; }
+            input {
+                padding: 15px;
+                width: 80%;
+                font-size: 16px;
+                border: 1px solid #ddd;
+                border-radius: 8px;
+                margin-bottom: 20px;
+                text-align: center;
+                outline: none;
+            }
+            input:focus { border-color: #00B900; }
+            button {
+                padding: 14px 20px;
+                font-size: 16px;
+                background-color: #00B900;
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-weight: bold;
+                width: 85%;
+                cursor: pointer;
+            }
+            button:active { background-color: #009900; }
+        </style>
+    </head>
+    <body>
         <div class="container">
-            <h3>📈 請輸入欲查詢的股票代號</h3>
-            <input type="text" id="stockCode" placeholder="例如：2330 或 AAPL" inputmode="numeric">
-            <br>
+            <h3>📈 個股快速查詢</h3>
+            <input type="text" id="stockCode" placeholder="輸入代碼 (例：2330 或 AAPL)" style="text-transform: uppercase;">
+            
+            <input type="number" id="days" placeholder="查詢天數 (選填，預設為當日)">
+            
             <button onclick="sendStockCommand()">立即查詢</button>
         </div>
 
         <script>
-            // 系統初始化 (LIFF ID 暫時留空，我們下一步會填入)
+            // 已經幫你填好你的專屬 LIFF ID
             liff.init({ liffId: "2010266740-hdqBlZ15" }).catch(err => console.error(err));
 
             function sendStockCommand() {
-                const code = document.getElementById('stockCode').value.trim();
+                const code = document.getElementById('stockCode').value.trim().toUpperCase();
+                const days = document.getElementById('days').value.trim();
+                
                 if (code) {
+                    let commandText = '個股 ' + code;
+                    if (days) {
+                        commandText += ' ' + days;
+                    }
+
                     // 透過 LINE 發送隱藏指令
                     liff.sendMessages([{
                         type: 'text',
-                        text: '個股 ' + code
+                        text: commandText
                     }]).then(() => {
-                        // 成功後自動關閉視窗
                         liff.closeWindow();
                     }).catch(err => {
                         alert("傳送失敗，請確認網路狀態：" + err);
                     });
                 } else {
-                    alert("請先輸入股票代號！");
+                    alert("請先輸入股票代碼！");
                 }
             }
         </script>
     </body>
     </html>
     """
-
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
     reply_token = event.reply_token
