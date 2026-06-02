@@ -141,6 +141,97 @@ def oauth2callback():
 
     return '<h1 style="text-align:center;padding-top:50px;font-family:sans-serif;color:#00B900;">✅ 授權成功！請回到 LINE</h1>'
 
+app = Flask(__name__)
+
+# ==========================================
+# 新增：LIFF 股票查詢專屬網頁
+# ==========================================
+@app.route('/liff')
+def liff_page():
+    return """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0">
+        <title>個股快速查詢</title>
+        <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+        <style>
+            body { 
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; 
+                background-color: #f4f5f7; 
+                padding: 20px; 
+                text-align: center; 
+            }
+            .container { 
+                background: white; 
+                padding: 30px 20px; 
+                border-radius: 12px; 
+                box-shadow: 0 4px 12px rgba(0,0,0,0.05); 
+                margin-top: 10px; 
+            }
+            h3 { color: #333; margin-bottom: 20px; font-size: 18px; }
+            input { 
+                padding: 15px; 
+                width: 80%; 
+                font-size: 18px; 
+                border: 1px solid #ddd; 
+                border-radius: 8px; 
+                margin-bottom: 20px; 
+                text-align: center; 
+                outline: none;
+            }
+            input:focus { border-color: #00B900; }
+            button { 
+                padding: 14px 20px; 
+                font-size: 16px; 
+                background-color: #00B900; 
+                color: white; 
+                border: none; 
+                border-radius: 8px; 
+                font-weight: bold; 
+                width: 85%; 
+                cursor: pointer; 
+            }
+            button:active { background-color: #009900; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h3>📈 請輸入欲查詢的股票代號</h3>
+            <input type="text" id="stockCode" placeholder="例如：2330 或 AAPL" inputmode="numeric">
+            <br>
+            <button onclick="sendStockCommand()">立即查詢</button>
+        </div>
+
+        <script>
+            // 系統初始化 (LIFF ID 暫時留空，我們下一步會填入)
+            liff.init({ liffId: "YOUR_LIFF_ID_HERE" }).catch(err => console.error(err));
+
+            function sendStockCommand() {
+                const code = document.getElementById('stockCode').value.trim();
+                if (code) {
+                    // 透過 LINE 發送隱藏指令
+                    liff.sendMessages([{
+                        type: 'text',
+                        text: '個股 ' + code
+                    }]).then(() => {
+                        // 成功後自動關閉視窗
+                        liff.closeWindow();
+                    }).catch(err => {
+                        alert("傳送失敗，請確認網路狀態：" + err);
+                    });
+                } else {
+                    alert("請先輸入股票代號！");
+                }
+            }
+        </script>
+    </body>
+    </html>
+    """
+
+# 下方保留你原本的 @handler.add... 等程式碼
+
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
     user_id = event.source.user_id
