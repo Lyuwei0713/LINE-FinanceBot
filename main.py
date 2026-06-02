@@ -206,7 +206,7 @@ def liff_page():
 
         <script>
             // 系統初始化 (LIFF ID 暫時留空，我們下一步會填入)
-            liff.init({ liffId: "YOUR_LIFF_ID_HERE" }).catch(err => console.error(err));
+            liff.init({ liffId: "2010266740-hdqBlZ15" }).catch(err => console.error(err));
 
             function sendStockCommand() {
                 const code = document.getElementById('stockCode').value.trim();
