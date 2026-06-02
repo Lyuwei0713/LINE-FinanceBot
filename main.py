@@ -382,8 +382,63 @@ def handle_message(event):
                 reply_text = "⚠️ 無法辨識指令。\n💡 請輸入『功能』查看完整系統指令清單。"
                 
         except Exception as e:
-            reply_text = f"⚠️ 系統發生錯誤：{e}"
+            # ==========================================
+        # 錯誤捕捉與友善引導系統
+        # ==========================================
+        except ValueError as ve:
+            # 專門捕捉「非數字」轉換錯誤 (最常發生在試算表金額欄位被打上純文字時)
+            reply_text = (
+                "⚠️ 【資料格式異常】\n"
+                "系統在結算財報時，發現了無法計算的內容。\n\n"
+                "💡 修正建議：\n"
+                "請打開您的 Google 試算表，檢查「金額」欄位是否不小心輸入了文字或符號（例如：1,000、$100、一百）。請將它們改回純數字格式即可！\n\n"
+                f"🔧 (系統除錯代碼：{ve})"
+            )
+            
+        except Exception as e:
+            # 捕捉其他外部 API 或網路錯誤，並將錯誤訊息轉小寫進行關鍵字辨識
+            error_msg = str(e).lower()
+            
+            if "invalid_grant" in error_msg or "refresh_token" in error_msg:
+                reply_text = (
+                    "⚠️ 【授權狀態失效】\n"
+                    "系統與您的 Google 雲端硬碟失去了連線。\n\n"
+                    "💡 修正建議：\n"
+                    "可能是授權已過期，或是您曾更改過密碼。請在聊天室輸入任意文字，系統會重新給您授權連結，點擊重新綁定即可恢復！"
+                )
+                
+            elif "not found" in error_msg or "404" in error_msg:
+                reply_text = (
+                    "⚠️ 【找不到雲端帳本】\n"
+                    "系統無法在您的 Google 雲端硬碟中找到記帳本。\n\n"
+                    "💡 修正建議：\n"
+                    "請確認您沒有不小心刪除名為「LINE_Finance_記帳本」的檔案。您可以直接對我輸入『重置帳本』，我會為您重新建立一份全新的！"
+                )
+                
+            elif "quota" in error_msg or "rate limit" in error_msg or "429" in error_msg:
+                reply_text = (
+                    "⚠️ 【系統線路壅塞】\n"
+                    "目前查詢資料庫的頻率太高，觸發了安全保護機制。\n\n"
+                    "💡 修正建議：\n"
+                    "請稍作休息，大約 1~2 分鐘後再重新輸入指令查詢即可！"
+                )
+                
+            else:
+                # 真的遇到從未見過的未知錯誤時的保底機制
+                reply_text = (
+                    "⚠️ 【發生預期外的狀況】\n"
+                    "抱歉，系統遇到了一個未知的錯誤。\n\n"
+                    "💡 修正建議：\n"
+                    "請將下方的除錯代碼截圖提供給開發人員進行維修：\n"
+                    f"🔧 ({e})"
+                )
 
+    # 4. 統一回傳訊息給 LINE 聊天室
+    with ApiClient(configuration) as api_client:
+        MessagingApi(api_client).reply_message(ReplyMessageRequest(
+            reply_token=event.reply_token,
+            messages=[TextMessage(text=reply_text)]
+        ))
     # 4. 統一回傳訊息給 LINE 聊天室
     with ApiClient(configuration) as api_client:
         MessagingApi(api_client).reply_message(ReplyMessageRequest(
