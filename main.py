@@ -159,8 +159,7 @@ def liff_page():
     </div>
 
     <script>
-        // 記得把這裡的 LIFF ID 換成你自己的！
-        liff.init({ liffId: "YOUR_LIFF_ID_HERE" }).catch(err => console.error(err));
+        liff.init({ liffId: "2010266740-hdqBlZ15" }).catch(err => console.error(err));
 
         function sendStockCommand() {
             // 抓取兩個輸入框的值
