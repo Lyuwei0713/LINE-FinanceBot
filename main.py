@@ -146,7 +146,6 @@ def handle_message(event):
     user_id = event.source.user_id
     user_data = db.reference(f'users/{user_id}').get()
 
-    # 1. 檢查是否已經綁定 Google 帳號
     if not user_data or 'refresh_token' not in user_data:
         auth_link = f"{RENDER_URL}/authorize/{user_id}?openExternalBrowser=1"
         reply_text = (
@@ -161,7 +160,6 @@ def handle_message(event):
         msg = user_text.split()
         
         try:
-            # 2. 建立 Google API 連線
             creds = Credentials(
                 token=user_data['token'],
                 refresh_token=user_data['refresh_token'],
@@ -173,7 +171,6 @@ def handle_message(event):
             drive_service = build('drive', 'v3', credentials=creds)
             sheets_service = build('sheets', 'v4', credentials=creds)
             
-            # 3. 取得或建立試算表 ID
             spreadsheet_id = user_data.get('spreadsheet_id')
             if not spreadsheet_id:
                 results = drive_service.files().list(q="name='LINE_Finance_記帳本' and mimeType='application/vnd.google-apps.spreadsheet'", spaces='drive').execute()
@@ -191,7 +188,17 @@ def handle_message(event):
                 db.reference(f'users/{user_id}').update({'spreadsheet_id': spreadsheet_id})
 
             # ==========================================
-            # 功能一：功能指南 (配合四宮格設計)
+            # 🌟 優化核心：建立偽裝瀏覽器的 Session
+            # ==========================================
+            custom_session = requests.Session()
+            custom_session.headers.update({
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.5"
+            })
+
+            # ==========================================
+            # 功能一：功能指南 
             # ==========================================
             if user_text in ["功能", "幫助", "help", "指令", "功能指南"]:
                 reply_text = (
@@ -211,10 +218,10 @@ def handle_message(event):
                 )
 
             # ==========================================
-            # 功能二：大盤走勢分析
+            # 功能二：大盤走勢分析 (導入 Session)
             # ==========================================
             elif user_text in ["大盤走勢", "大盤"]:
-                market_index = yf.Ticker("^TWII")
+                market_index = yf.Ticker("^TWII", session=custom_session)
                 hist = market_index.history(period="2d")
                 
                 if not hist.empty:
@@ -251,7 +258,7 @@ def handle_message(event):
                     reply_text = "❌ 無法取得大盤資料，請稍後再試。"
 
             # ==========================================
-            # 功能三：升級版收支報告 (動態分類)
+            # 功能三：升級版收支報告 
             # ==========================================
             elif user_text in ["本月財報", "本月收支"]:
                 result = sheets_service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range='A:D').execute()
@@ -307,7 +314,7 @@ def handle_message(event):
                 reply_text = "✅ 系統重置完畢，帳本已更新為初始狀態。"
 
             # ==========================================
-            # 功能五：股票查詢系統 (自動判斷上市櫃與智慧防呆)
+            # 功能五：股票查詢系統 (導入 Session)
             # ==========================================
             elif user_text.startswith("個股"):
                 stock_args = user_text.replace("個股", "").strip().split()
@@ -337,7 +344,8 @@ def handle_message(event):
                         
                         hist = None
                         for t in tickers_to_try:
-                            stock = yf.Ticker(t)
+                            # 加入偽裝 Session 進行查詢
+                            stock = yf.Ticker(t, session=custom_session)
                             hist = stock.history(period=f"{days}d")
                             if not hist.empty:
                                 break
@@ -432,7 +440,7 @@ def handle_message(event):
                     "💡 修正建議：\n"
                     "請確認您沒有不小心刪除名為「LINE_Finance_記帳本」的檔案。您可以直接對我輸入『重置帳本』，我會為您重新建立一份全新的！"
                 )
-            elif "quota" in error_msg or "rate limit" in error_msg or "429" in error_msg:
+            elif "quota" in error_msg or "rate limit" in error_msg or "429" in error_msg or "too many requests" in error_msg:
                 reply_text = (
                     "⚠️ 【系統線路壅塞】\n"
                     "目前查詢資料庫的頻率太高，觸發了安全保護機制。\n\n"
