@@ -361,10 +361,14 @@ def handle_message(event):
                     
                     hist = None
                     for t in tickers_to_try:
-                        stock = yf.Ticker(t, session=req_session)
-                        hist = stock.history(period=f"{days}d")
-                        if not hist.empty:
-                            break
+                        try:
+                            stock = yf.Ticker(t, session=req_session)
+                            hist = stock.history(period=f"{days}d")
+                            if not hist.empty:
+                                break  # 成功找到資料就跳出迴圈
+                        except Exception:
+                            # 如果發生 404 找不到的錯誤，就當作沒事，繼續試下一個後綴 (.TWO)
+                            continue
                             
                     if hist is not None and not hist.empty:
                         if len(stock_args) == 1:
