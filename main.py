@@ -217,58 +217,60 @@ def handle_message(event):
                     "⚠️ 系統指令：輸入 `重置帳本` 可清空所有紀錄"
                 )
 
-           # ==========================================
-            # 功能二：大盤走勢分析 (導入自動備援機制)
+          # ==========================================
+            # 功能二：大盤走勢分析 (直連台灣證交所官方 API)
             # ==========================================
             elif user_text in ["大盤走勢", "大盤"]:
-                # 第一階段：嘗試抓取真實的台灣加權指數 (^TWII)
-                market_index = yf.Ticker("^TWII")
-                hist = market_index.history(period="2d")
-                ticker_name = "台灣加權指數"
-                is_proxy = False
-                
-                # 第二階段：如果真實大盤被阻擋 (回傳空值)，立刻啟動備援，改抓 0050.TW
-                if hist.empty:
-                    market_index = yf.Ticker("0050.TW")
-                    hist = market_index.history(period="2d")
-                    ticker_name = "台灣 50 ETF (大盤趨勢替身)"
-                    is_proxy = True
-
-                if not hist.empty:
-                    latest = hist.iloc[-1]
-                    price = latest['Close']
-                    if len(hist) > 1:
-                        prev_close = hist.iloc[-2]['Close']
-                        change = price - prev_close
-                        change_percent = (change / prev_close) * 100
-                    else:
-                        change, change_percent = 0.0, 0.0
-                        
-                    sign = "▲" if change > 0 else "▼" if change < 0 else "─"
+                try:
+                    # 捨棄 Yahoo Finance，直接呼叫 TWSE 官方即時 JSON 介面
+                    url = "https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_t00.tw&json=1&delay=0"
                     
-                    if change > 0:
-                        trend_text = "市場呈現上漲趨勢，請持續留意後續動能。"
-                    elif change < 0:
-                        trend_text = "市場呈現下跌趨勢，建議審慎評估部位風險。"
-                    else:
-                        trend_text = "大盤平盤整理，建議持續觀察。"
-                        
-                    # 如果啟動了備援機制，在底部加上小提示
-                    proxy_warning = "\n(💡 註：因 API 限制，系統自動切換為高度連動的 0050 作為大盤參考)" if is_proxy else ""
+                    # 發送請求 (附帶偽裝標頭確保連線順暢)
+                    res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
+                    data = res.json()
                     
-                    reply_text = (
-                        f"📊 【今日大盤分析 - {ticker_name}】\n"
-                        f"────────────────\n"
-                        f"🔹 當前指數/價格：{price:,.2f}\n"
-                        f"🔸 今日漲跌：{sign} {abs(change):.2f} ({change_percent:+.2f}%)\n"
-                        f"🔹 今日最高：{latest['High']:,.2f}\n"
-                        f"🔸 今日最低：{latest['Low']:,.2f}\n"
-                        f"────────────────\n"
-                        f"💡 系統觀察：{trend_text}{proxy_warning}\n"
-                        f"📅 資料時間：{hist.index[-1].strftime('%Y-%m-%d')}"
-                    )
-                else:
-                    reply_text = "❌ 伺服器連線異常，大盤與備用數據皆無法取得，請稍後再試。"
+                    if "msgArray" in data and len(data["msgArray"]) > 0:
+                        info = data["msgArray"][0]
+                        
+                        # 解析官方資料欄位 (z:最新指數, y:昨收, h:最高, l:最低)
+                        z_val = info.get("z", "-")
+                        # 若遇盤前未開盤狀態，將最新價暫時代入昨收價防呆
+                        current_price = float(z_val) if z_val != "-" else float(info.get("y", 0))
+                        prev_close = float(info.get("y", 0))
+                        high = float(info.get("h", current_price))
+                        low = float(info.get("l", current_price))
+                        
+                        change = current_price - prev_close
+                        change_percent = (change / prev_close) * 100 if prev_close != 0 else 0.0
+                        
+                        sign = "▲" if change > 0 else "▼" if change < 0 else "─"
+                        
+                        if change > 0:
+                            trend_text = "市場呈現上漲趨勢，請持續留意後續動能。"
+                        elif change < 0:
+                            trend_text = "市場呈現下跌趨勢，建議審慎評估部位風險。"
+                        else:
+                            trend_text = "大盤平盤整理，建議持續觀察。"
+                            
+                        # 格式化日期時間 (將 20260602 轉為 2026-06-02)
+                        date_str = info.get('d', '')
+                        formatted_date = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}" if len(date_str) == 8 else date_str
+                        
+                        reply_text = (
+                            f"📊 【今日大盤分析 - 台灣加權指數】\n"
+                            f"────────────────\n"
+                            f"🔹 當前指數：{current_price:,.2f}\n"
+                            f"🔸 今日漲跌：{sign} {abs(change):.2f} ({change_percent:+.2f}%)\n"
+                            f"🔹 今日最高：{high:,.2f}\n"
+                            f"🔸 今日最低：{low:,.2f}\n"
+                            f"────────────────\n"
+                            f"💡 系統觀察：{trend_text}\n"
+                            f"📅 資料時間：{formatted_date} {info.get('t', '')}"
+                        )
+                    else:
+                        reply_text = "❌ 無法解析證交所資料，請稍後再試。"
+                except Exception as e:
+                    reply_text = f"❌ 讀取大盤時發生連線錯誤：{e}"
             # ==========================================
             # 功能三：升級版收支報告 
             # ==========================================
