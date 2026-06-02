@@ -305,13 +305,13 @@ def handle_message(event):
                     body={'values': [["日期", "分類", "項目", "金額"]]}
                 ).execute()
                 reply_text = "✅ 系統重置完畢，帳本已更新為初始狀態。"
-# ==========================================
+
+            # ==========================================
             # 功能五：股票查詢系統 (自動判斷上市櫃與智慧防呆)
             # ==========================================
             elif user_text.startswith("個股"):
                 stock_args = user_text.replace("個股", "").strip().split()
                 
-                # 錯誤攔截 1：完全沒有輸入代號
                 if len(stock_args) == 0:
                     reply_text = (
                         "⚠️ 【股票查詢格式不完整】\n"
@@ -324,17 +324,14 @@ def handle_message(event):
                 else:
                     ticker_input = stock_args[0].upper()
                     
-                    # 錯誤攔截 2：歷史天數輸入了非數字（例如中文或加上單位）
                     if len(stock_args) >= 2 and not stock_args[1].isdigit():
                         reply_text = (
                             "⚠️ 【查詢天數格式異常】\n"
                             "歷史天數必須是「純阿拉伯數字」。\n\n"
                             "💡 修正建議：\n"
-                            "請確認是否不小心輸入了中文字或天數單位。\n"
                             "正確範例請輸入：`個股 2330 5` (代表查詢過去 5 天)"
                         )
                     else:
-                        # 格式正確，開始執行查詢
                         days = 2 if len(stock_args) == 1 else int(stock_args[1])
                         tickers_to_try = [f"{ticker_input}.TW", f"{ticker_input}.TWO"] if ticker_input.isdigit() else [ticker_input]
                         
@@ -346,7 +343,6 @@ def handle_message(event):
                                 break
                                 
                         if hist is not None and not hist.empty:
-                            # 模式一：當日行情
                             if len(stock_args) == 1:
                                 latest = hist.iloc[-1]
                                 price = latest['Close']
@@ -368,15 +364,13 @@ def handle_message(event):
                                     f"────────────────\n"
                                     f"📅 資料時間：{hist.index[-1].strftime('%Y-%m-%d')}"
                                 )
-                            # 模式二：歷史行情
-                            elif len(stock_args) == 2:
+                            elif len(stock_args) >= 2:
                                 reply_text = f"📊 【{ticker_input} 過去 {days} 天歷史資訊】\n────────────────\n"
                                 for date, row in reversed(list(hist.iterrows())):
                                     date_str = date.strftime('%m/%d')
                                     reply_text += f"📅 {date_str} | 收盤: ${row['Close']:.2f} | 總量: {int(row['Volume'])/1000:,.0f}K 股\n"
                                 reply_text += "────────────────\n💡 註：成交量 K 代表千股。"
                         else:
-                            # 錯誤攔截 3：查無此股票
                             reply_text = (
                                 f"❌ 【找不到股票代號：{ticker_input}】\n"
                                 "資料庫中無法取得該股票的報價資訊。\n\n"
@@ -384,6 +378,7 @@ def handle_message(event):
                                 "1. 請確認代碼是否輸入正確。\n"
                                 "2. 若為剛上市櫃之新股，API 可能尚未建檔。"
                             )
+
             # ==========================================
             # 功能六：極速記帳與自動分類
             # ==========================================
@@ -409,12 +404,10 @@ def handle_message(event):
             else:
                 reply_text = "⚠️ 無法辨識指令。\n💡 請輸入『功能』查看完整系統指令清單。"
                 
-        except Exception as e:
-            # ==========================================
+        # ==========================================
         # 錯誤捕捉與友善引導系統
         # ==========================================
         except ValueError as ve:
-            # 專門捕捉「非數字」轉換錯誤 (最常發生在試算表金額欄位被打上純文字時)
             reply_text = (
                 "⚠️ 【資料格式異常】\n"
                 "系統在結算財報時，發現了無法計算的內容。\n\n"
@@ -424,9 +417,7 @@ def handle_message(event):
             )
             
         except Exception as e:
-            # 捕捉其他外部 API 或網路錯誤，並將錯誤訊息轉小寫進行關鍵字辨識
             error_msg = str(e).lower()
-            
             if "invalid_grant" in error_msg or "refresh_token" in error_msg:
                 reply_text = (
                     "⚠️ 【授權狀態失效】\n"
@@ -434,7 +425,6 @@ def handle_message(event):
                     "💡 修正建議：\n"
                     "可能是授權已過期，或是您曾更改過密碼。請在聊天室輸入任意文字，系統會重新給您授權連結，點擊重新綁定即可恢復！"
                 )
-                
             elif "not found" in error_msg or "404" in error_msg:
                 reply_text = (
                     "⚠️ 【找不到雲端帳本】\n"
@@ -442,7 +432,6 @@ def handle_message(event):
                     "💡 修正建議：\n"
                     "請確認您沒有不小心刪除名為「LINE_Finance_記帳本」的檔案。您可以直接對我輸入『重置帳本』，我會為您重新建立一份全新的！"
                 )
-                
             elif "quota" in error_msg or "rate limit" in error_msg or "429" in error_msg:
                 reply_text = (
                     "⚠️ 【系統線路壅塞】\n"
@@ -450,9 +439,7 @@ def handle_message(event):
                     "💡 修正建議：\n"
                     "請稍作休息，大約 1~2 分鐘後再重新輸入指令查詢即可！"
                 )
-                
             else:
-                # 真的遇到從未見過的未知錯誤時的保底機制
                 reply_text = (
                     "⚠️ 【發生預期外的狀況】\n"
                     "抱歉，系統遇到了一個未知的錯誤。\n\n"
@@ -461,12 +448,6 @@ def handle_message(event):
                     f"🔧 ({e})"
                 )
 
-    # 4. 統一回傳訊息給 LINE 聊天室
-    with ApiClient(configuration) as api_client:
-        MessagingApi(api_client).reply_message(ReplyMessageRequest(
-            reply_token=event.reply_token,
-            messages=[TextMessage(text=reply_text)]
-        ))
     # 4. 統一回傳訊息給 LINE 聊天室
     with ApiClient(configuration) as api_client:
         MessagingApi(api_client).reply_message(ReplyMessageRequest(
