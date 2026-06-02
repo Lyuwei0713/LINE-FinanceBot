@@ -305,57 +305,85 @@ def handle_message(event):
                     body={'values': [["日期", "分類", "項目", "金額"]]}
                 ).execute()
                 reply_text = "✅ 系統重置完畢，帳本已更新為初始狀態。"
-
-            # ==========================================
-            # 功能五：股票查詢系統 (自動判斷上市櫃)
+# ==========================================
+            # 功能五：股票查詢系統 (自動判斷上市櫃與智慧防呆)
             # ==========================================
             elif user_text.startswith("個股"):
                 stock_args = user_text.replace("個股", "").strip().split()
-                if len(stock_args) >= 1:
-                    ticker_input = stock_args[0].upper()
-                    days = 2 if len(stock_args) == 1 else int(stock_args[1])
-                    tickers_to_try = [f"{ticker_input}.TW", f"{ticker_input}.TWO"] if ticker_input.isdigit() else [ticker_input]
-                    
-                    hist = None
-                    for t in tickers_to_try:
-                        stock = yf.Ticker(t)
-                        hist = stock.history(period=f"{days}d")
-                        if not hist.empty:
-                            break
-                            
-                    if hist is not None and not hist.empty:
-                        if len(stock_args) == 1:
-                            latest = hist.iloc[-1]
-                            price = latest['Close']
-                            if len(hist) > 1:
-                                prev_close = hist.iloc[-2]['Close']
-                                change = price - prev_close
-                                change_percent = (change / prev_close) * 100
-                            else:
-                                change, change_percent = 0.0, 0.0
-                            sign = "▲" if change > 0 else "▼" if change < 0 else "─"
-                            reply_text = (
-                                f"📈 【個股當日行情 - {ticker_input}】\n"
-                                f"────────────────\n"
-                                f"🔹 當前收盤：${price:.2f}\n"
-                                f"🔸 今日漲跌：{sign} {abs(change):.2f} ({change_percent:+.2f}%)\n"
-                                f"🔹 今日最高：${latest['High']:.2f}\n"
-                                f"🔸 今日最低：${latest['Low']:.2f}\n"
-                                f"🔹 成交股數：{int(latest['Volume']):,} 股\n"
-                                f"────────────────\n"
-                                f"📅 資料時間：{hist.index[-1].strftime('%Y-%m-%d')}"
-                            )
-                        elif len(stock_args) == 2:
-                            reply_text = f"📊 【{ticker_input} 過去 {days} 天歷史資訊】\n────────────────\n"
-                            for date, row in reversed(list(hist.iterrows())):
-                                date_str = date.strftime('%m/%d')
-                                reply_text += f"📅 {date_str} | 收盤: ${row['Close']:.2f} | 總量: {int(row['Volume'])/1000:,.0f}K 股\n"
-                            reply_text += "────────────────\n💡 註：成交量 K 代表千股。"
-                    else:
-                        reply_text = f"❌ 找不到股票代號【{ticker_input}】，請確認代碼是否正確。"
+                
+                # 錯誤攔截 1：完全沒有輸入代號
+                if len(stock_args) == 0:
+                    reply_text = (
+                        "⚠️ 【股票查詢格式不完整】\n"
+                        "系統未偵測到您想查詢的股票代號。\n\n"
+                        "💡 修正建議：\n"
+                        "請在「個股」後面加上半形空格與代號。\n"
+                        "▫️ 查當日範例：`個股 2330`\n"
+                        "▫️ 查歷史範例：`個股 2330 5`"
+                    )
                 else:
-                    reply_text = "❌ 股票查詢格式錯誤。範例：『個股 2330』"
-
+                    ticker_input = stock_args[0].upper()
+                    
+                    # 錯誤攔截 2：歷史天數輸入了非數字（例如中文或加上單位）
+                    if len(stock_args) >= 2 and not stock_args[1].isdigit():
+                        reply_text = (
+                            "⚠️ 【查詢天數格式異常】\n"
+                            "歷史天數必須是「純阿拉伯數字」。\n\n"
+                            "💡 修正建議：\n"
+                            "請確認是否不小心輸入了中文字或天數單位。\n"
+                            "正確範例請輸入：`個股 2330 5` (代表查詢過去 5 天)"
+                        )
+                    else:
+                        # 格式正確，開始執行查詢
+                        days = 2 if len(stock_args) == 1 else int(stock_args[1])
+                        tickers_to_try = [f"{ticker_input}.TW", f"{ticker_input}.TWO"] if ticker_input.isdigit() else [ticker_input]
+                        
+                        hist = None
+                        for t in tickers_to_try:
+                            stock = yf.Ticker(t)
+                            hist = stock.history(period=f"{days}d")
+                            if not hist.empty:
+                                break
+                                
+                        if hist is not None and not hist.empty:
+                            # 模式一：當日行情
+                            if len(stock_args) == 1:
+                                latest = hist.iloc[-1]
+                                price = latest['Close']
+                                if len(hist) > 1:
+                                    prev_close = hist.iloc[-2]['Close']
+                                    change = price - prev_close
+                                    change_percent = (change / prev_close) * 100
+                                else:
+                                    change, change_percent = 0.0, 0.0
+                                sign = "▲" if change > 0 else "▼" if change < 0 else "─"
+                                reply_text = (
+                                    f"📈 【個股當日行情 - {ticker_input}】\n"
+                                    f"────────────────\n"
+                                    f"🔹 當前收盤：${price:.2f}\n"
+                                    f"🔸 今日漲跌：{sign} {abs(change):.2f} ({change_percent:+.2f}%)\n"
+                                    f"🔹 今日最高：${latest['High']:.2f}\n"
+                                    f"🔸 今日最低：${latest['Low']:.2f}\n"
+                                    f"🔹 成交股數：{int(latest['Volume']):,} 股\n"
+                                    f"────────────────\n"
+                                    f"📅 資料時間：{hist.index[-1].strftime('%Y-%m-%d')}"
+                                )
+                            # 模式二：歷史行情
+                            elif len(stock_args) == 2:
+                                reply_text = f"📊 【{ticker_input} 過去 {days} 天歷史資訊】\n────────────────\n"
+                                for date, row in reversed(list(hist.iterrows())):
+                                    date_str = date.strftime('%m/%d')
+                                    reply_text += f"📅 {date_str} | 收盤: ${row['Close']:.2f} | 總量: {int(row['Volume'])/1000:,.0f}K 股\n"
+                                reply_text += "────────────────\n💡 註：成交量 K 代表千股。"
+                        else:
+                            # 錯誤攔截 3：查無此股票
+                            reply_text = (
+                                f"❌ 【找不到股票代號：{ticker_input}】\n"
+                                "資料庫中無法取得該股票的報價資訊。\n\n"
+                                "💡 修正建議：\n"
+                                "1. 請確認代碼是否輸入正確。\n"
+                                "2. 若為剛上市櫃之新股，API 可能尚未建檔。"
+                            )
             # ==========================================
             # 功能六：極速記帳與自動分類
             # ==========================================
