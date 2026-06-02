@@ -131,8 +131,6 @@ def oauth2callback():
 
     return '<h1 style="text-align:center;padding-top:50px;font-family:sans-serif;color:#00B900;">✅ 授權成功！請回到 LINE</h1>'
 
-app = Flask(__name__)
-
 # ==========================================
 # 新增：LIFF 股票查詢專屬網頁
 # ==========================================
