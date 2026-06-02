@@ -150,11 +150,11 @@ def handle_message(event):
     if not user_data or 'refresh_token' not in user_data:
         auth_link = f"{RENDER_URL}/authorize/{user_id}?openExternalBrowser=1"
         reply_text = (
-            "歡迎使用 FinanceBot！✨\n"
-            "請先點擊下方連結完成 Google 帳號授權，才能開啟智慧記帳功能喔：\n"
+            "歡迎使用 FinanceBot 財務管家系統。\n\n"
+            "請先點擊下方連結完成 Google 帳號授權，以啟用雲端記帳與試算表功能：\n"
             f"{auth_link}\n\n"
-            "⚠️ 【 授權小提示 】\n"
-            "若跳出「Google 尚未驗證」或「不安全」的警告，請安心點擊左下角【進階】，並選擇【前往... (不安全)】勾選允許即可！"
+            "⚠️ 【 授權提示 】\n"
+            "若出現「Google 尚未驗證」警告，請點擊左下角【進階】，並選擇【前往... (不安全)】允許存取即可。"
         )
     else:
         user_text = event.message.text.strip()
@@ -173,7 +173,7 @@ def handle_message(event):
             drive_service = build('drive', 'v3', credentials=creds)
             sheets_service = build('sheets', 'v4', credentials=creds)
             
-            # 3. 取得試算表 ID
+            # 3. 取得或建立試算表 ID
             spreadsheet_id = user_data.get('spreadsheet_id')
             if not spreadsheet_id:
                 results = drive_service.files().list(q="name='LINE_Finance_記帳本' and mimeType='application/vnd.google-apps.spreadsheet'", spaces='drive').execute()
@@ -191,25 +191,67 @@ def handle_message(event):
                 db.reference(f'users/{user_id}').update({'spreadsheet_id': spreadsheet_id})
 
             # ==========================================
-            # 功能一：功能導覽提示 
+            # 功能一：功能指南 (配合四宮格設計)
             # ==========================================
-            if user_text in ["功能", "幫助", "help", "指令"]:
+            if user_text in ["功能", "幫助", "help", "指令", "功能指南"]:
                 reply_text = (
-                    "🌟 【FinanceBot 功能指令大全】\n"
-                    "(*¯︶¯*) 主人～我是您的專屬財務管家！\n\n"
-                    "📝 1. 極速記帳\n"
-                    "👉 格式：`[項目] [金額]` (例：`便當 100`)\n\n"
-                    "📊 2. 本月收支明細儀表板\n"
-                    "👉 關鍵字：`本月收支` 或 `本月財報`\n\n"
-                    "📈 3. 股票行情快查\n"
-                    "👉 當天行情：`個股 [代號]` (例：`個股 2330`)\n"
-                    "👉 歷史區間：`個股 [代號] [天數]` (例：`個股 2330 5`)\n\n"
-                    "⚠️ 4. 一鍵重置帳本\n"
-                    "👉 關鍵字：`重置帳本`"
+                    "📊 【FinanceBot 系統指令指南】\n"
+                    "為您提供四大核心財務功能：\n\n"
+                    "📈 1. 【個股行情】\n"
+                    "👉 查當天：`個股 [代號]` (例：`個股 2330`)\n"
+                    "👉 查歷史：`個股 [代號] [天數]`\n\n"
+                    "💰 2. 【本月收支】\n"
+                    "👉 輸入 `本月收支` 查看分類明細與結算\n"
+                    "👉 (記帳格式：`[項目] [金額]`，例：`便當 100`)\n\n"
+                    "📊 3. 【大盤走勢】\n"
+                    "👉 輸入 `大盤走勢` 查看今日台股加權指數\n\n"
+                    "📖 4. 【功能指南】\n"
+                    "👉 顯示此功能說明書\n\n"
+                    "⚠️ 系統指令：輸入 `重置帳本` 可清空所有紀錄"
                 )
 
             # ==========================================
-            # 功能二：升級版收支報告 (動態計算分類明細，不用再開試算表！)
+            # 功能二：大盤走勢分析
+            # ==========================================
+            elif user_text in ["大盤走勢", "大盤"]:
+                market_index = yf.Ticker("^TWII")
+                hist = market_index.history(period="2d")
+                
+                if not hist.empty:
+                    latest = hist.iloc[-1]
+                    price = latest['Close']
+                    if len(hist) > 1:
+                        prev_close = hist.iloc[-2]['Close']
+                        change = price - prev_close
+                        change_percent = (change / prev_close) * 100
+                    else:
+                        change, change_percent = 0.0, 0.0
+                        
+                    sign = "▲" if change > 0 else "▼" if change < 0 else "─"
+                    
+                    if change > 0:
+                        trend_text = "市場呈現上漲趨勢，請持續留意後續動能。"
+                    elif change < 0:
+                        trend_text = "市場呈現下跌趨勢，建議審慎評估部位風險。"
+                    else:
+                        trend_text = "大盤平盤整理，建議持續觀察。"
+                    
+                    reply_text = (
+                        f"📊 【今日大盤分析 - 台灣加權指數】\n"
+                        f"────────────────\n"
+                        f"🔹 當前指數：{price:,.2f}\n"
+                        f"🔸 今日漲跌：{sign} {abs(change):.2f} ({change_percent:+.2f}%)\n"
+                        f"🔹 今日最高：{latest['High']:,.2f}\n"
+                        f"🔸 今日最低：{latest['Low']:,.2f}\n"
+                        f"────────────────\n"
+                        f"💡 系統觀察：{trend_text}\n"
+                        f"📅 資料時間：{hist.index[-1].strftime('%Y-%m-%d')}"
+                    )
+                else:
+                    reply_text = "❌ 無法取得大盤資料，請稍後再試。"
+
+            # ==========================================
+            # 功能三：升級版收支報告 (動態分類)
             # ==========================================
             elif user_text in ["本月財報", "本月收支"]:
                 result = sheets_service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range='A:D').execute()
@@ -217,9 +259,9 @@ def handle_message(event):
                 
                 total_income = 0
                 total_expense = 0
-                expense_detail = {} # 用來動態統計各項支出的字典
+                expense_detail = {}
                 
-                for row in values[1:]: # 跳過標題列
+                for row in values[1:]:
                     if len(row) >= 4:
                         category = row[1]
                         amount = int(row[3])
@@ -228,15 +270,12 @@ def handle_message(event):
                             total_income += amount
                         else:
                             total_expense += amount
-                            # 自動把相同的支出分類加總在一起
                             expense_detail[category] = expense_detail.get(category, 0) + amount
                             
                 net_balance = total_income - total_expense
                 
-                # 組合出漂亮的收支儀表板
                 reply_text = (
                     "📊 【本月收支理財儀表板】\n"
-                    "(*¯︶¯*) 主人，這是您目前的資產狀態：\n"
                     "────────────────\n"
                     f"💰 總收入： ${total_income:,}\n"
                     f"💸 總支出： ${total_expense:,}\n"
@@ -244,21 +283,19 @@ def handle_message(event):
                     "💡 【各項支出明細】\n"
                 )
                 
-                # 如果有支出明細，就逐行印出來；沒有的話就顯示無支出
                 if expense_detail:
                     for cat, amt in expense_detail.items():
                         reply_text += f" ▫️ {cat}： ${amt:,}\n"
                 else:
-                    reply_text += "  暫無任何支出紀錄報告。\n"
+                    reply_text += "  暫無任何支出紀錄。\n"
                     
                 reply_text += (
                     "────────────────\n"
-                    f"✨ 本月結餘： ${net_balance:,}\n\n"
-                    "運算完畢！主人今天也辛苦了～"
+                    f"✨ 本月結餘： ${net_balance:,}"
                 )
 
             # ==========================================
-            # 功能三：一鍵重置帳本
+            # 功能四：一鍵重置帳本
             # ==========================================
             elif user_text == "重置帳本":
                 sheets_service.spreadsheets().values().clear(spreadsheetId=spreadsheet_id, range='A:D').execute()
@@ -267,10 +304,10 @@ def handle_message(event):
                     valueInputOption="USER_ENTERED",
                     body={'values': [["日期", "分類", "項目", "金額"]]}
                 ).execute()
-                reply_text = "✨ 系統重置完畢！帳本已更新為全新乾淨狀態。"
+                reply_text = "✅ 系統重置完畢，帳本已更新為初始狀態。"
 
             # ==========================================
-            # 功能四：股票查詢系統
+            # 功能五：股票查詢系統 (自動判斷上市櫃)
             # ==========================================
             elif user_text.startswith("個股"):
                 stock_args = user_text.replace("個股", "").strip().split()
@@ -315,12 +352,12 @@ def handle_message(event):
                                 reply_text += f"📅 {date_str} | 收盤: ${row['Close']:.2f} | 總量: {int(row['Volume'])/1000:,.0f}K 股\n"
                             reply_text += "────────────────\n💡 註：成交量 K 代表千股。"
                     else:
-                        reply_text = f"❌ 找不到股票代號【{ticker_input}】。"
+                        reply_text = f"❌ 找不到股票代號【{ticker_input}】，請確認代碼是否正確。"
                 else:
-                    reply_text = "❌ 股票查詢格式錯誤！"
+                    reply_text = "❌ 股票查詢格式錯誤。範例：『個股 2330』"
 
             # ==========================================
-            # 功能五：極速記帳與自動分類
+            # 功能六：極速記帳與自動分類
             # ==========================================
             elif len(msg) == 2 and msg[1].isdigit():
                 item, price = msg[0], int(msg[1])
@@ -342,7 +379,7 @@ def handle_message(event):
                 reply_text = f"✅ 已紀錄：[{category}] {item} ${price}"
 
             else:
-                reply_text = "主人，我看不懂這個指令 w\n💡 請輸入『功能』查看完整指令清單！"
+                reply_text = "⚠️ 無法辨識指令。\n💡 請輸入『功能』查看完整系統指令清單。"
                 
         except Exception as e:
             reply_text = f"⚠️ 系統發生錯誤：{e}"
