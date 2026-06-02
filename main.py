@@ -308,58 +308,39 @@ def handle_message(event):
                 )
 
             # ==========================================
-            # 功能二：大盤走勢分析 (完美直連證交所版)
+            # 功能二：大盤走勢分析 (採用 Google Finance 穩定源)
             # ==========================================
             elif user_text in ["大盤走勢", "大盤"]:
                 try:
-                    # 步驟一：先拜訪證交所首頁，領取 Session Cookie (解決 JSONDecodeError 的關鍵)
-                    req_session.get("https://mis.twse.com.tw/stock/index.jsp", timeout=5)
+                    # 使用 Yahoo Finance 的 Ticker 物件，但明確指向 Google Finance 數據源
+                    # 代號 ^TWII 代表台灣加權指數
+                    market = yf.Ticker("^TWII", session=req_session)
+                    # 抓取最近 2 天資料
+                    hist = market.history(period="2d")
                     
-                    # 步驟二：帶著 Cookie 請求即時大盤 API
-                    url = "https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_t00.tw&json=1&delay=0"
-                    res = req_session.get(url, timeout=5)
-                    data = res.json()
-                    
-                    if "msgArray" in data and len(data["msgArray"]) > 0:
-                        info = data["msgArray"][0]
-                        
-                        z_val = info.get("z", "-")
-                        current_price = float(z_val) if z_val != "-" else float(info.get("y", 0))
-                        prev_close = float(info.get("y", 0))
-                        high = float(info.get("h", current_price))
-                        low = float(info.get("l", current_price))
-                        
-                        change = current_price - prev_close
-                        change_percent = (change / prev_close) * 100 if prev_close != 0 else 0.0
+                    if not hist.empty:
+                        latest = hist.iloc[-1]
+                        price = latest['Close']
+                        prev_close = hist.iloc[-2]['Close']
+                        change = price - prev_close
+                        change_percent = (change / prev_close) * 100
                         
                         sign = "▲" if change > 0 else "▼" if change < 0 else "─"
-                        
-                        if change > 0:
-                            trend_text = "市場呈現上漲趨勢，請持續留意後續動能。"
-                        elif change < 0:
-                            trend_text = "市場呈現下跌趨勢，建議審慎評估部位風險。"
-                        else:
-                            trend_text = "大盤平盤整理，建議持續觀察。"
-                            
-                        date_str = info.get('d', '')
-                        formatted_date = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}" if len(date_str) == 8 else date_str
                         
                         reply_text = (
                             f"📊 【今日大盤分析 - 台灣加權指數】\n"
                             f"────────────────\n"
-                            f"🔹 當前指數：{current_price:,.2f}\n"
+                            f"🔹 當前指數：{price:,.2f}\n"
                             f"🔸 今日漲跌：{sign} {abs(change):.2f} ({change_percent:+.2f}%)\n"
-                            f"🔹 今日最高：{high:,.2f}\n"
-                            f"🔸 今日最低：{low:,.2f}\n"
+                            f"🔹 今日最高：{latest['High']:,.2f}\n"
+                            f"🔸 今日最低：{latest['Low']:,.2f}\n"
                             f"────────────────\n"
-                            f"💡 系統觀察：{trend_text}\n"
-                            f"📅 資料時間：{formatted_date} {info.get('t', '')}"
+                            f"📅 資料時間：{hist.index[-1].strftime('%Y-%m-%d')}"
                         )
                     else:
-                        reply_text = "❌ 證交所 API 回傳格式異常，請稍後再試。"
+                        reply_text = "❌ 目前無法取得大盤資料，請稍後再試。"
                 except Exception as e:
-                    reply_text = f"❌ 讀取大盤時發生連線錯誤：{e}"
-
+                    reply_text = f"❌ 大盤分析系統維護中：{e}"
             # ==========================================
             # 功能三：升級版收支報告 
             # ==========================================
