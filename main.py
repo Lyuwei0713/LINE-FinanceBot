@@ -45,24 +45,12 @@ import traceback  # 確保這行有加在 main.py 的最上方（import 區塊�
 
 @app.route("/callback", methods=['POST'])
 def callback():
-    signature = request.headers.get('X-Line-Signature')
-    body = request.get_data()
-    
+    signature = request.headers['X-Line-Signature']
+    body = request.get_data(as_text=True)
     try:
-        # 這裡會觸發你寫在下方的 @handler.add 邏輯
-        handler.handle(body.decode('utf-8'), signature)
-        
-    except Exception as e:
-        # 這次我們強制把底層的 Traceback 全部印出來！
-        error_trace = traceback.format_exc()
-        print("====== 案發現場開始 ======")
-        print(f"錯誤類型: {type(e)}")
-        print(f"錯誤訊息: {e}")
-        print(f"詳細追蹤:\n{error_trace}")
-        print("====== 案發現場結束 ======")
-        
+        handler.handle(body, signature)
+    except InvalidSignatureError:
         abort(400)
-        
     return 'OK'
 
 @app.route("/authorize/<user_id>")
@@ -280,5 +268,6 @@ def handle_message(event):
             reply_token=reply_token,
             messages=[TextMessage(text=reply_text)]
         ))
+
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=10000)
+    app.run(host="0.0.0.0", port=8000)
