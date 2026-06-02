@@ -43,13 +43,15 @@ SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/
 
 import traceback  # 確保這行有加在 main.py 的最上方（import 區塊）
 
+# 這是最重要的 Webhook 接收點，沒有它 LINE 就找不到門進來
 @app.route("/callback", methods=['POST'])
 def callback():
     signature = request.headers['X-Line-Signature']
     body = request.get_data(as_text=True)
     try:
-        handler.handle(body, signature)
-    except InvalidSignatureError:
+        handler.handle(body, signature) # 這裡會呼叫你初始化的 handler
+    except Exception as e:
+        print(f"Error: {e}")
         abort(400)
     return 'OK'
 
