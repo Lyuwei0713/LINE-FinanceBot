@@ -188,13 +188,12 @@ def handle_message(event):
                 db.reference(f'users/{user_id}').update({'spreadsheet_id': spreadsheet_id})
 
             # ==========================================
-            # 🌟 優化核心：建立偽裝瀏覽器的 Session
+            # 建立共用的偽裝瀏覽器 Session
             # ==========================================
-            custom_session = requests.Session()
-            custom_session.headers.update({
+            req_session = requests.Session()
+            req_session.headers.update({
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.5"
+                "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7"
             })
 
             # ==========================================
@@ -217,24 +216,23 @@ def handle_message(event):
                     "⚠️ 系統指令：輸入 `重置帳本` 可清空所有紀錄"
                 )
 
-          # ==========================================
-            # 功能二：大盤走勢分析 (直連台灣證交所官方 API)
+            # ==========================================
+            # 功能二：大盤走勢分析 (完美直連證交所版)
             # ==========================================
             elif user_text in ["大盤走勢", "大盤"]:
                 try:
-                    # 捨棄 Yahoo Finance，直接呼叫 TWSE 官方即時 JSON 介面
-                    url = "https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_t00.tw&json=1&delay=0"
+                    # 步驟一：先拜訪證交所首頁，領取 Session Cookie (解決 JSONDecodeError 的關鍵)
+                    req_session.get("https://mis.twse.com.tw/stock/index.jsp", timeout=5)
                     
-                    # 發送請求 (附帶偽裝標頭確保連線順暢)
-                    res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
+                    # 步驟二：帶著 Cookie 請求即時大盤 API
+                    url = "https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_t00.tw&json=1&delay=0"
+                    res = req_session.get(url, timeout=5)
                     data = res.json()
                     
                     if "msgArray" in data and len(data["msgArray"]) > 0:
                         info = data["msgArray"][0]
                         
-                        # 解析官方資料欄位 (z:最新指數, y:昨收, h:最高, l:最低)
                         z_val = info.get("z", "-")
-                        # 若遇盤前未開盤狀態，將最新價暫時代入昨收價防呆
                         current_price = float(z_val) if z_val != "-" else float(info.get("y", 0))
                         prev_close = float(info.get("y", 0))
                         high = float(info.get("h", current_price))
@@ -252,7 +250,6 @@ def handle_message(event):
                         else:
                             trend_text = "大盤平盤整理，建議持續觀察。"
                             
-                        # 格式化日期時間 (將 20260602 轉為 2026-06-02)
                         date_str = info.get('d', '')
                         formatted_date = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}" if len(date_str) == 8 else date_str
                         
@@ -268,9 +265,10 @@ def handle_message(event):
                             f"📅 資料時間：{formatted_date} {info.get('t', '')}"
                         )
                     else:
-                        reply_text = "❌ 無法解析證交所資料，請稍後再試。"
+                        reply_text = "❌ 證交所 API 回傳格式異常，請稍後再試。"
                 except Exception as e:
                     reply_text = f"❌ 讀取大盤時發生連線錯誤：{e}"
+
             # ==========================================
             # 功能三：升級版收支報告 
             # ==========================================
@@ -328,7 +326,7 @@ def handle_message(event):
                 reply_text = "✅ 系統重置完畢，帳本已更新為初始狀態。"
 
             # ==========================================
-            # 功能五：股票查詢系統 (導入 Session)
+            # 功能五：股票查詢系統
             # ==========================================
             elif user_text.startswith("個股"):
                 stock_args = user_text.replace("個股", "").strip().split()
@@ -359,7 +357,7 @@ def handle_message(event):
                         hist = None
                         for t in tickers_to_try:
                             # 加入偽裝 Session 進行查詢
-                            stock = yf.Ticker(t, session=custom_session)
+                            stock = yf.Ticker(t, session=req_session)
                             hist = stock.history(period=f"{days}d")
                             if not hist.empty:
                                 break
