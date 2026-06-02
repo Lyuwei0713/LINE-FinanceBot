@@ -145,46 +145,51 @@ def liff_page():
         <title>個股快速查詢</title>
         <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
         <style>
-            body { 
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; 
-                background-color: #f4f5f7; 
-                padding: 20px; 
-                text-align: center; 
+           <body>
+    <div class="container">
+        <h3>📈 個股快速查詢</h3>
+        
+        <input type="text" id="stockCode" placeholder="輸入代碼 (例：2330 或 AAPL)" style="text-transform: uppercase;">
+        <br>
+        
+        <input type="number" id="days" placeholder="查詢天數 (選填，預設為當日)">
+        <br>
+        
+        <button onclick="sendStockCommand()">立即查詢</button>
+    </div>
+
+    <script>
+        // 記得把這裡的 LIFF ID 換成你自己的！
+        liff.init({ liffId: "YOUR_LIFF_ID_HERE" }).catch(err => console.error(err));
+
+        function sendStockCommand() {
+            // 抓取兩個輸入框的值
+            const code = document.getElementById('stockCode').value.trim().toUpperCase();
+            const days = document.getElementById('days').value.trim();
+            
+            if (code) {
+                // 自動幫使用者把「代號」跟「天數」用空格組合起來
+                let commandText = '個股 ' + code;
+                if (days) {
+                    commandText += ' ' + days;
+                }
+
+                // 透過 LINE 發送隱藏指令
+                liff.sendMessages([{
+                    type: 'text',
+                    text: commandText
+                }]).then(() => {
+                    // 成功後自動關閉視窗
+                    liff.closeWindow();
+                }).catch(err => {
+                    alert("傳送失敗，請確認網路狀態：" + err);
+                });
+            } else {
+                alert("請先輸入股票代碼！");
             }
-            .container { 
-                background: white; 
-                padding: 30px 20px; 
-                border-radius: 12px; 
-                box-shadow: 0 4px 12px rgba(0,0,0,0.05); 
-                margin-top: 10px; 
-            }
-            h3 { color: #333; margin-bottom: 20px; font-size: 18px; }
-            input { 
-                padding: 15px; 
-                width: 80%; 
-                font-size: 18px; 
-                border: 1px solid #ddd; 
-                border-radius: 8px; 
-                margin-bottom: 20px; 
-                text-align: center; 
-                outline: none;
-            }
-            input:focus { border-color: #00B900; }
-            button { 
-                padding: 14px 20px; 
-                font-size: 16px; 
-                background-color: #00B900; 
-                color: white; 
-                border: none; 
-                border-radius: 8px; 
-                font-weight: bold; 
-                width: 85%; 
-                cursor: pointer; 
-            }
-            button:active { background-color: #009900; }
-        </style>
-    </head>
-    <body>
+        }
+    </script>
+</body>
         <div class="container">
             <h3>📈 請輸入欲查詢的股票代號</h3>
             <input type="text" id="stockCode" placeholder="例如：2330 或 AAPL" inputmode="numeric">
