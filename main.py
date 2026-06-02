@@ -217,13 +217,23 @@ def handle_message(event):
                     "⚠️ 系統指令：輸入 `重置帳本` 可清空所有紀錄"
                 )
 
-            # ==========================================
-            # 功能二：大盤走勢分析 (導入 Session)
+           # ==========================================
+            # 功能二：大盤走勢分析 (導入自動備援機制)
             # ==========================================
             elif user_text in ["大盤走勢", "大盤"]:
-                market_index = yf.Ticker("^TWII", session=custom_session)
+                # 第一階段：嘗試抓取真實的台灣加權指數 (^TWII)
+                market_index = yf.Ticker("^TWII")
                 hist = market_index.history(period="2d")
+                ticker_name = "台灣加權指數"
+                is_proxy = False
                 
+                # 第二階段：如果真實大盤被阻擋 (回傳空值)，立刻啟動備援，改抓 0050.TW
+                if hist.empty:
+                    market_index = yf.Ticker("0050.TW")
+                    hist = market_index.history(period="2d")
+                    ticker_name = "台灣 50 ETF (大盤趨勢替身)"
+                    is_proxy = True
+
                 if not hist.empty:
                     latest = hist.iloc[-1]
                     price = latest['Close']
@@ -242,21 +252,23 @@ def handle_message(event):
                         trend_text = "市場呈現下跌趨勢，建議審慎評估部位風險。"
                     else:
                         trend_text = "大盤平盤整理，建議持續觀察。"
+                        
+                    # 如果啟動了備援機制，在底部加上小提示
+                    proxy_warning = "\n(💡 註：因 API 限制，系統自動切換為高度連動的 0050 作為大盤參考)" if is_proxy else ""
                     
                     reply_text = (
-                        f"📊 【今日大盤分析 - 台灣加權指數】\n"
+                        f"📊 【今日大盤分析 - {ticker_name}】\n"
                         f"────────────────\n"
-                        f"🔹 當前指數：{price:,.2f}\n"
+                        f"🔹 當前指數/價格：{price:,.2f}\n"
                         f"🔸 今日漲跌：{sign} {abs(change):.2f} ({change_percent:+.2f}%)\n"
                         f"🔹 今日最高：{latest['High']:,.2f}\n"
                         f"🔸 今日最低：{latest['Low']:,.2f}\n"
                         f"────────────────\n"
-                        f"💡 系統觀察：{trend_text}\n"
+                        f"💡 系統觀察：{trend_text}{proxy_warning}\n"
                         f"📅 資料時間：{hist.index[-1].strftime('%Y-%m-%d')}"
                     )
                 else:
-                    reply_text = "❌ 無法取得大盤資料，請稍後再試。"
-
+                    reply_text = "❌ 伺服器連線異常，大盤與備用數據皆無法取得，請稍後再試。"
             # ==========================================
             # 功能三：升級版收支報告 
             # ==========================================
