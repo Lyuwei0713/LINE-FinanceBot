@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import requests
 import yfinance as yf
 from datetime import datetime
@@ -113,7 +114,7 @@ def handle_message(event):
                 "【 FinanceBot 資產管理助理 】\n"
                 "═════════════════\n"
                 "歡迎使用 FinanceBot 財務數據管理系統。\n\n"
-                "本系統提供自動化收支會計紀錄、市場大盤動態及個股歷史數據分析。為啟用您的專屬雲端帳本，請先完成 Google 帳戶安全授權。\n\n"
+                "本系統提供 automatic 收支會計紀錄、市場大盤動態及個股歷史數據分析。為啟用您的專屬雲端帳本，請先完成 Google 帳戶安全授權。\n\n"
                 "👉 授權連結：\n"
                 f"🔗 {auth_link}\n\n"
                 "※ 安全提示：若程序中出現「Google 尚未驗證」之警示，請點選【進階】並選擇【允許存取】即可完成安全性綁定。"
@@ -128,16 +129,15 @@ def handle_message(event):
             sheets_service = build('sheets', 'v4', credentials=creds)
             spreadsheet_id = user_data.get('spreadsheet_id')
 
-            # 宣告請求對話，避免頻率限制
             req_session = requests.Session()
             req_session.headers.update({"User-Agent": "Mozilla/5.0"})
 
             # ==========================================
-            # 指令集業務邏輯
+            # 智慧語意模糊判定核心邏輯
             # ==========================================
             
-            # 指令：獲取操作指南 (已更新)
-            if user_text in ["功能", "幫助", "help", "功能指南"]:
+            # 1. 操作指南模糊判定
+            if any(k in user_text for k in ["功能", "幫助", "help", "指南", "怎麼用", "選單", "指令", "說明"]):
                 reply_text = (
                     "📋【 FinanceBot 系統操作指南 】\n"
                     "═════════════════\n"
@@ -152,15 +152,15 @@ def handle_message(event):
                     " ▫️ 個股 [代碼] ➔ 指定個股當日詳細 K 線數據\n"
                     " ▫️ 個股 [代碼] [天數] ➔ 指定個股歷史數據變動表\n\n"
                     "■ 雲端帳務管理\n"
-                    " ▫️ 帳本 ➔ 獲取雲端試算表帳本直達連結 (隨時檢視)\n"
+                    " ▫️ 帳本 ➔ 獲取雲端試算表帳本直達連結\n"
                     " ▫️ 收支 ➔ 匯總本月財務摘要與分類明細表\n"
                     " ▫️ 重置帳本 ➔ 清空現有數據並還原初始欄位\n"
                     "═════════════════\n"
                     "※ 提示：點擊下方選單可直接開啟網頁介面，進行免空格個股查詢。"
                 )
 
-            # 指令：直達雲端帳本通道 (全新優化功能)
-            elif user_text in ["帳本", "連結", "電子帳本", "查帳"]:
+            # 2. 帳本直達連結高寬容度模糊判定 (輸入「帳本」、「網址」、「連結」、「試算表」皆可觸發)
+            elif any(k in user_text for k in ["帳本", "連結", "表格", "試算表", "excel", "查帳", "網址", "我的帳", "雲端帳"]):
                 if spreadsheet_id:
                     reply_text = (
                         "📂【 雲端電子帳本直達通道 】\n"
@@ -171,8 +171,18 @@ def handle_message(event):
                 else:
                     reply_text = "⚠️ 系統提示：未偵測到雲端試算表帳本，請輸入「重置帳本」以進行初始化。"
 
-            # 指令：台灣大盤加權指數查詢
-            elif user_text in ["大盤", "大盤走勢"]:
+            # 3. 清空與還原帳本高寬容度模糊判定 (輸入短字「重置」、「重製」、「清空」、「洗掉」皆可精準攔截)
+            elif any(k in user_text for k in ["重置", "重製", "清空", "洗掉", "刪除帳", "還原帳", "重新初始化"]):
+                if spreadsheet_id:
+                    sheets_service.spreadsheets().values().clear(spreadsheetId=spreadsheet_id, range='A:D').execute()
+                    sheets_service.spreadsheets().values().append(
+                        spreadsheetId=spreadsheet_id, range="A1", valueInputOption="USER_ENTERED",
+                        body={'values': [["日期", "分類", "項目", "金額"]]}
+                    ).execute()
+                    reply_text = "✅ 系統提示：雲端試算表數據已清空，成功初始化會計科目欄位。"
+
+            # 4. 台灣大盤加權指數模糊判定
+            elif any(k in user_text for k in ["大盤", "加權指數", "台股走勢", "市場行情"]):
                 ticker = yf.Ticker("^TWII", session=req_session)
                 hist = ticker.history(period="2d")
                 if not hist.empty:
@@ -192,8 +202,8 @@ def handle_message(event):
                 else:
                     reply_text = "❌ 系統提示：無法取得大盤即時數據，請稍後再試。"
 
-            # 指令：本月財務摘要匯總
-            elif "收支" in user_text or "財報" in user_text:
+            # 5. 本月財務摘要模糊判定
+            elif any(k in user_text for k in ["收支", "財報", "財務報告", "花多少", "結餘", "帳目", "統計"]):
                 if not spreadsheet_id:
                     reply_text = "⚠️ 系統提示：未偵測到雲端試算表帳本，請輸入「重置帳本」以進行初始化。"
                 else:
@@ -229,26 +239,16 @@ def handle_message(event):
                         f"🔹 本期淨結餘 ｜ ${net_balance:,}"
                     )
 
-            # 指令：清空帳本
-            elif user_text == "重置帳本":
-                if spreadsheet_id:
-                    sheets_service.spreadsheets().values().clear(spreadsheetId=spreadsheet_id, range='A:D').execute()
-                    sheets_service.spreadsheets().values().append(
-                        spreadsheetId=spreadsheet_id, range="A1", valueInputOption="USER_ENTERED",
-                        body={'values': [["日期", "分類", "項目", "金額"]]}
-                    ).execute()
-                    reply_text = "✅ 系統提示：雲端試算表數據已清空，成功初始化會計科目欄位。"
-
-            # 指令：個股數據查詢
-            elif user_text.startswith("個股"):
-                stock_args = user_text.replace("個股", "").strip().split()
-                if len(stock_args) == 0:
-                    reply_text = "⚠️ 格式不符。請在「個股」後加上半形空格與代號。\n▫️ 範例：個股 2330"
+            # 6. 個股數據查詢 (Token 提取免空格技術)
+            elif any(k in user_text for k in ["個股", "股票"]):
+                tokens = re.findall(r'[A-Za-z0-9]+', user_text)
+                if not tokens:
+                    reply_text = "⚠️ 系統提示：未能從指令中提取有效的證券代碼。\n▫️ 範例：個股 2330"
                 else:
-                    ticker_input = stock_args[0].upper()
-                    is_single_day = len(stock_args) == 1
+                    ticker_input = tokens[0].upper()
+                    is_single_day = len(tokens) == 1
                     
-                    fetch_period = "1y" if is_single_day else f"{int(stock_args[1]) + 5}d"
+                    fetch_period = "1y" if is_single_day else f"{int(tokens[1]) + 5}d"
                     tickers_to_try = [f"{ticker_input}.TW", f"{ticker_input}.TWO"] if ticker_input.isdigit() else [ticker_input]
                     
                     hist = None
@@ -292,7 +292,7 @@ def handle_message(event):
                                 f"📅 數據時間：{hist.index[-1].strftime('%Y-%m-%d')}"
                             )
                         else:
-                            days = int(stock_args[1])
+                            days = int(tokens[1])
                             sub_hist = hist.tail(days)
                             reply_text = f"📊【 歷史交易數據變動表 · {ticker_input} 】\n═════════════════\n"
                             for date, row in reversed(list(sub_hist.iterrows())):
@@ -300,7 +300,7 @@ def handle_message(event):
                     else:
                         reply_text = f"❌ 系統提示：於市場數據庫中未搜尋到代號「{ticker_input}」，請確認後重試。"
 
-            # 指令：智慧語意解析記帳
+            # 7. 智慧語意解析記帳 (標準輸入阻斷)
             elif len(msg) == 2 and msg[1].isdigit():
                 item, price = msg[0], int(msg[1])
                 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
