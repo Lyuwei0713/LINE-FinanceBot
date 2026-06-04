@@ -278,7 +278,7 @@ def handle_message(event):
                     else:
                         reply_text = f"❌ 找不到股票代號：{ticker_input}。"
 
-            # 功能六：AI 智慧語意記帳 (終極多重防爆備用版)
+            # 功能六：AI 智慧語意記帳 (換裝 2026 最新大腦模型池)
             elif len(msg) == 2 and msg[1].isdigit():
                 item, price = msg[0], int(msg[1])
                 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -302,12 +302,11 @@ def handle_message(event):
                         f"⚠️ 核心要求：絕對不要輸出任何解釋、標點符號、引號、括號或多餘空白，只需要回答那三個字或四個字即可。"
                     )
                     
-                    # 建立自動補位模型池，對抗 404 區域與型號限制問題
-                    model_pool = ['gemini-1.5-flash', 'gemini-1.5-flash-latest', 'gemini-pro']
+                    # 🚀 更換為 2026 現行可用的最新模型池
+                    model_pool = ['gemini-3.5-flash', 'gemini-2.5-flash', 'gemini-3.1-flash-lite']
                     
                     for model_name in model_pool:
                         try:
-                            # 動態生成測試模型
                             current_model = genai.GenerativeModel(model_name)
                             ai_response = current_model.generate_content(prompt)
                             predicted_category = ai_response.text.strip().replace("'", "").replace('"', '').replace("「", "").replace("」", "")
@@ -321,9 +320,8 @@ def handle_message(event):
                                     break
                             
                             if is_ai_success:
-                                break  # 成功分類，直接跳出模型池輪詢，不浪費下一個嘗試
+                                break
                         except Exception as e:
-                            # 記錄錯誤並放開截斷限制，同時繼續嘗試池中的下一個模型
                             ai_status = f"💥 {model_name}錯誤: {str(e)}"
                             continue
                 
@@ -333,7 +331,6 @@ def handle_message(event):
                         body={'values': [[now, category, item, price]]}
                     ).execute()
                     
-                    # 依據最終是否有任何一個 AI 模型成功上陣來發送標籤
                     if is_ai_success:
                         reply_text = f"✅ 已紀錄：[{category}✨] {item} ${price}"
                     else:
