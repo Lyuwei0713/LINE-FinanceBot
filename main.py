@@ -9,7 +9,7 @@ import firebase_admin
 from firebase_admin import credentials, db
 from linebot.v3 import WebhookHandler
 from linebot.v3.messaging import Configuration, ApiClient, MessagingApi, ReplyMessageRequest, TextMessage
-from linebot.v3.webhooks import MessageEvent, TextMessageContent
+from linebot.v3.webhooks import MessageEvent, TextMessageContent, FollowEvent
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 import google.generativeai as genai
@@ -93,7 +93,32 @@ def liff_page():
     """
 
 # ==========================================
-# 4. LINE 訊息處理核心邏輯
+# 4. 新增：加入好友即時推送授權連結機制
+# ==========================================
+@handler.add(FollowEvent)
+def handle_follow(event):
+    reply_token = event.reply_token
+    user_id = event.source.user_id
+    
+    auth_link = f"{RENDER_URL}/authorize/{user_id}?openExternalBrowser=1"
+    
+    welcome_text = (
+        "【 FinanceBot 資產管理助理 】\n"
+        "═════════════════\n"
+        "歡迎使用 FinanceBot 財務數據管理系統。\n\n"
+        "本系統提供自動化收支會計紀錄、市場大盤動態及個股歷史數據分析。為啟用您的專屬雲端帳本，請先完成 Google 帳戶安全授權。\n\n"
+        "👉 專屬授權連結：\n"
+        f"🔗 {auth_link}\n\n"
+        "※ 安全提示：若程序中出現「Google 尚未驗證」之警示，請點選【進階】並選擇【允許存取】即可完成安全性綁定。"
+    )
+    
+    with ApiClient(configuration) as api_client:
+        MessagingApi(api_client).reply_message(ReplyMessageRequest(
+            reply_token=reply_token, messages=[TextMessage(text=welcome_text)]
+        ))
+
+# ==========================================
+# 5. LINE 訊息處理核心邏輯（模糊比對優化版）
 # ==========================================
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
@@ -107,20 +132,19 @@ def handle_message(event):
         user_id = event.source.user_id
         user_data = db.reference(f'users/{user_id}').get()
 
-        # 權限驗證：新用戶 Google 帳戶授權引導
+        # 權限驗證防禦機制
         if not user_data or 'refresh_token' not in user_data:
             auth_link = f"{RENDER_URL}/authorize/{user_id}?openExternalBrowser=1"
             reply_text = (
                 "【 FinanceBot 資產管理助理 】\n"
                 "═════════════════\n"
                 "歡迎使用 FinanceBot 財務數據管理系統。\n\n"
-                "本系統提供 automatic 收支會計紀錄、市場大盤動態及個股歷史數據分析。為啟用您的專屬雲端帳本，請先完成 Google 帳戶安全授權。\n\n"
+                "本系統提供自動化收支會計紀錄、市場大盤動態及個股歷史數據分析。為啟用您的專屬雲端帳本，請先完成 Google 帳戶安全授權。\n\n"
                 "👉 授權連結：\n"
                 f"🔗 {auth_link}\n\n"
                 "※ 安全提示：若程序中出現「Google 尚未驗證」之警示，請點選【進階】並選擇【允許存取】即可完成安全性綁定。"
             )
         else:
-            # 載入 Google 憑證組態
             creds = Credentials(
                 token=user_data['token'], refresh_token=user_data['refresh_token'],
                 token_uri=user_data['token_uri'], client_id=user_data['client_id'],
@@ -132,9 +156,7 @@ def handle_message(event):
             req_session = requests.Session()
             req_session.headers.update({"User-Agent": "Mozilla/5.0"})
 
-            # ==========================================
-            # 智慧語意模糊判定核心邏輯
-            # ==========================================
+            # ---- 智慧語意模糊判定分支 ----
             
             # 1. 操作指南模糊判定
             if any(k in user_text for k in ["功能", "幫助", "help", "指南", "怎麼用", "選單", "指令", "說明"]):
@@ -144,7 +166,7 @@ def handle_message(event):
                     "請依據下列標準格式輸入指令，或搭配圖文選單進行操作：\n\n"
                     "■ 智慧會計記帳\n"
                     "格式 ➔ [項目名稱] [半形空格] [金額]\n"
-                    " ▫️ 範例：便當 75\n"
+                    " ▫️ 範例：路易莎咖啡 75\n"
                     " ▫️ 範例：專案報酬 15000\n"
                     "（系統將自動解析語意並歸類至雲端帳本）\n\n"
                     "■ 市場行情查詢\n"
@@ -159,7 +181,7 @@ def handle_message(event):
                     "※ 提示：點擊下方選單可直接開啟網頁介面，進行免空格個股查詢。"
                 )
 
-            # 2. 帳本直達連結高寬容度模糊判定 (輸入「帳本」、「網址」、「連結」、「試算表」皆可觸發)
+            # 2. 帳本直達連結模糊判定
             elif any(k in user_text for k in ["帳本", "連結", "表格", "試算表", "excel", "查帳", "網址", "我的帳", "雲端帳"]):
                 if spreadsheet_id:
                     reply_text = (
@@ -171,7 +193,7 @@ def handle_message(event):
                 else:
                     reply_text = "⚠️ 系統提示：未偵測到雲端試算表帳本，請輸入「重置帳本」以進行初始化。"
 
-            # 3. 清空與還原帳本高寬容度模糊判定 (輸入短字「重置」、「重製」、「清空」、「洗掉」皆可精準攔截)
+            # 3. 清空與還原帳本模糊判定
             elif any(k in user_text for k in ["重置", "重製", "清空", "洗掉", "刪除帳", "還原帳", "重新初始化"]):
                 if spreadsheet_id:
                     sheets_service.spreadsheets().values().clear(spreadsheetId=spreadsheet_id, range='A:D').execute()
@@ -373,7 +395,7 @@ def handle_message(event):
         ))
 
 # ==========================================
-# 5. LINE Webhook 接收通道
+# 6. LINE Webhook 接收通道
 # ==========================================
 @app.route("/callback", methods=['POST'])
 def callback():
