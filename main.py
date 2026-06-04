@@ -19,13 +19,13 @@ import google.generativeai as genai
 app = Flask(__name__)
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 
-# 初始化 Gemini AI 大腦
+# 初始化 Gemini AI 基本設定
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
-    ai_model = genai.GenerativeModel('gemini-1.5-flash')
+    ai_model = True  # 標記金鑰存在
 else:
-    ai_model = None
+    ai_model = False
 
 # ==========================================
 # 2. 讀取環境變數與設定
@@ -132,7 +132,7 @@ def handle_message(event):
             req_session = requests.Session()
             req_session.headers.update({"User-Agent": "Mozilla/5.0"})
 
-            # --- 功能分支 ---
+            # --- 指令分支 ---
             if user_text in ["功能", "幫助", "help", "功能指南"]:
                 reply_text = (
                     "📱【 FinanceBot 功能指令指南 】\n"
@@ -278,13 +278,13 @@ def handle_message(event):
                     else:
                         reply_text = f"❌ 找不到股票代號：{ticker_input}。"
 
-            # 功能六：AI 智慧語意記帳 (全新升級：診斷防護版)
+            # 功能六：AI 智慧語意記帳 (終極多重防爆備用版)
             elif len(msg) == 2 and msg[1].isdigit():
                 item, price = msg[0], int(msg[1])
                 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 
-                category = "其他支出" # 預設值
-                ai_status = "❌ AI大腦未啟動 (請檢查 Render 環境變數 GEMINI_API_KEY)"
+                category = "其他支出"
+                ai_status = "❌ AI大腦未啟動 (環境變數缺失)"
                 is_ai_success = False
                 
                 if ai_model:
@@ -301,21 +301,31 @@ def handle_message(event):
                         f"- 水電費、電話費、瓦斯費、網路費、保險費 ➔ 帳單費\n\n"
                         f"⚠️ 核心要求：絕對不要輸出任何解釋、標點符號、引號、括號或多餘空白，只需要回答那三個字或四個字即可。"
                     )
-                    try:
-                        ai_response = ai_model.generate_content(prompt)
-                        predicted_category = ai_response.text.strip().replace("'", "").replace('"', '').replace("「", "").replace("」", "")
-                        
-                        possible_categories = ["伙食費", "交通費", "娛樂費", "日用品", "帳單費", "收入", "其他支出"]
-                        for cat in possible_categories:
-                            if cat in predicted_category:
-                                category = cat
-                                ai_status = "OK"
-                                is_ai_success = True
-                                break
-                        if not is_ai_success:
-                            ai_status = f"⚠️ AI回傳未知格式: {predicted_category[:15]}"
-                    except Exception as e:
-                        ai_status = f"💥 AI連線報錯: {str(e)[:25]}"
+                    
+                    # 建立自動補位模型池，對抗 404 區域與型號限制問題
+                    model_pool = ['gemini-1.5-flash', 'gemini-1.5-flash-latest', 'gemini-pro']
+                    
+                    for model_name in model_pool:
+                        try:
+                            # 動態生成測試模型
+                            current_model = genai.GenerativeModel(model_name)
+                            ai_response = current_model.generate_content(prompt)
+                            predicted_category = ai_response.text.strip().replace("'", "").replace('"', '').replace("「", "").replace("」", "")
+                            
+                            possible_categories = ["伙食費", "交通費", "娛樂費", "日用品", "帳單費", "收入", "其他支出"]
+                            for cat in possible_categories:
+                                if cat in predicted_category:
+                                    category = cat
+                                    ai_status = "OK"
+                                    is_ai_success = True
+                                    break
+                            
+                            if is_ai_success:
+                                break  # 成功分類，直接跳出模型池輪詢，不浪費下一個嘗試
+                        except Exception as e:
+                            # 記錄錯誤並放開截斷限制，同時繼續嘗試池中的下一個模型
+                            ai_status = f"💥 {model_name}錯誤: {str(e)}"
+                            continue
                 
                 if spreadsheet_id:
                     sheets_service.spreadsheets().values().append(
@@ -323,7 +333,7 @@ def handle_message(event):
                         body={'values': [[now, category, item, price]]}
                     ).execute()
                     
-                    # 依據診斷結果吐出不同的表情符號
+                    # 依據最終是否有任何一個 AI 模型成功上陣來發送標籤
                     if is_ai_success:
                         reply_text = f"✅ 已紀錄：[{category}✨] {item} ${price}"
                     else:
