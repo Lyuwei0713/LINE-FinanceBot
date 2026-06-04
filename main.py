@@ -29,19 +29,31 @@ else:
     ai_model = False
 
 # ==========================================
-# 2. 讀取環境變數與安全設定
+# 2. 讀取環境變數與安全設定 
 # ==========================================
 LINE_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
 LINE_SECRET = os.environ.get('LINE_CHANNEL_SECRET')
 RENDER_URL = os.environ.get('RENDER_URL')
 
-# Google OAuth 環境變數設定
+# 自動偵測並解析單一 JSON 字串環境變數
+G_CLIENT_SECRET_JSON = os.environ.get('G_CLIENT_SECRET_JSON')
 GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID')
 GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET')
 
+if G_CLIENT_SECRET_JSON:
+    try:
+        g_data = json.loads(G_CLIENT_SECRET_JSON)
+        web_data = g_data.get('web', g_data.get('installed', g_data))
+        GOOGLE_CLIENT_ID = web_data.get('client_id', GOOGLE_CLIENT_ID)
+        GOOGLE_CLIENT_SECRET = web_data.get('client_secret', GOOGLE_CLIENT_SECRET)
+    except Exception as e:
+        print(f"解析 G_CLIENT_SECRET_JSON 失敗: {e}")
+
+# 建立 LINE 設定實例
 configuration = Configuration(access_token=LINE_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_SECRET)
 
+# 初始化 Firebase 節點
 if not firebase_admin._apps:
     fb_config_str = os.environ.get('FIREBASE_CONFIG_JSON')
     db_url = os.environ.get('FIREBASE_DB_URL')
@@ -51,7 +63,7 @@ if not firebase_admin._apps:
         firebase_admin.initialize_app(cred, {'databaseURL': db_url})
 
 # ==========================================
-# 3. Google OAuth2 授權路由 (全新補回核心)
+# 3. Google OAuth2 授權路由
 # ==========================================
 @app.route('/authorize/<user_id>')
 def authorize(user_id):
@@ -79,7 +91,6 @@ def oauth2callback():
     redirect_uri = f"{RENDER_URL}/oauth2callback"
     token_url = "https://oauth2.googleapis.com/token"
     
-    # 透過 Code 交換 Access & Refresh Token
     data = {
         'code': code,
         'client_id': GOOGLE_CLIENT_ID,
@@ -90,7 +101,6 @@ def oauth2callback():
     res = requests.post(token_url, data=data).json()
     
     if 'access_token' in res:
-        # 動態構建暫時憑證以建立新試算表
         creds = Credentials(
             token=res['access_token'], refresh_token=res.get('refresh_token'),
             token_uri=token_url, client_id=GOOGLE_CLIENT_ID,
@@ -98,18 +108,15 @@ def oauth2callback():
         )
         sheets_service = build('sheets', 'v4', credentials=creds)
         
-        # 1. 於用戶雲端硬碟建立全新試算表
         spreadsheet_body = {'properties': {'title': 'FinanceBot 雲端財務帳本'}}
         spreadsheet = sheets_service.spreadsheets().create(body=spreadsheet_body, fields='spreadsheetId').execute()
         spreadsheet_id = spreadsheet.get('spreadsheetId')
         
-        # 2. 寫入標準會計科目初始表頭
         sheets_service.spreadsheets().values().append(
             spreadsheetId=spreadsheet_id, range="A1", valueInputOption="USER_ENTERED",
             body={'values': [["日期", "分類", "項目", "金額"]]}
         ).execute()
         
-        # 3. 將憑證與專屬帳本 ID 完整同步回寫至 Firebase 節點 (多用戶隔離)
         db.reference(f'users/{user_id}').set({
             'token': res['access_token'],
             'refresh_token': res.get('refresh_token'),
