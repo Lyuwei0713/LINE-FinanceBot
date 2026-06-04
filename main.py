@@ -19,16 +19,16 @@ import google.generativeai as genai
 app = Flask(__name__)
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 
-# 初始化 Gemini AI 基本設定
+# 初始化 Gemini 服務憑證
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
-    ai_model = True  # 標記金鑰存在
+    ai_model = True
 else:
     ai_model = False
 
 # ==========================================
-# 2. 讀取環境變數與設定
+# 2. 讀取環境變數與安全設定
 # ==========================================
 LINE_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
 LINE_SECRET = os.environ.get('LINE_CHANNEL_SECRET')
@@ -46,7 +46,7 @@ if not firebase_admin._apps:
         firebase_admin.initialize_app(cred, {'databaseURL': db_url})
 
 # ==========================================
-# 3. LIFF 股票查詢專屬網頁路由
+# 3. LIFF 數據查詢網頁路由
 # ==========================================
 @app.route('/liff')
 def liff_page():
@@ -56,24 +56,24 @@ def liff_page():
     <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0">
-        <title>個股快速查詢</title>
+        <title>個股數據查詢系統</title>
         <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
         <style>
-            body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background-color: #f4f5f7; padding: 20px; text-align: center; }
-            .container { background: white; padding: 30px 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); margin-top: 10px; }
-            h3 { color: #333; margin-bottom: 20px; font-size: 18px; }
-            input { padding: 15px; width: 80%; font-size: 16px; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 20px; text-align: center; outline: none; }
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #f4f5f7; padding: 20px; text-align: center; }
+            .container { background: white; padding: 30px 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); margin-top: 10px; }
+            h3 { color: #222; margin-bottom: 20px; font-size: 16px; font-weight: 600; }
+            input { padding: 12px; width: 80%; font-size: 15px; border: 1px solid #ccc; border-radius: 6px; margin-bottom: 15px; text-align: center; outline: none; }
             input:focus { border-color: #00B900; }
-            button { padding: 14px 20px; font-size: 16px; background-color: #00B900; color: white; border: none; border-radius: 8px; font-weight: bold; width: 85%; cursor: pointer; }
+            button { padding: 12px 20px; font-size: 15px; background-color: #00B900; color: white; border: none; border-radius: 6px; font-weight: bold; width: 85%; cursor: pointer; }
             button:active { background-color: #009900; }
         </style>
     </head>
     <body>
         <div class="container">
-            <h3>📈 個股快速查詢</h3>
-            <input type="text" id="stockCode" placeholder="輸入代碼 (例：2330 或 AAPL)" style="text-transform: uppercase;">
-            <input type="number" id="days" placeholder="查詢天數 (選填，預設為當日)">
-            <button onclick="sendStockCommand()">立即查詢</button>
+            <h3>📈 個股市場數據查詢</h3>
+            <input type="text" id="stockCode" placeholder="請輸入股票代碼 (例：2330 或 AAPL)" style="text-transform: uppercase;">
+            <input type="number" id="days" placeholder="請輸入查詢天數 (選填，預設為當日)">
+            <button onclick="sendStockCommand()">提交查詢</button>
         </div>
         <script>
             liff.init({ liffId: "2010266740-hdqBlZ15" }).catch(err => console.error(err));
@@ -83,8 +83,8 @@ def liff_page():
                 if (code) {
                     let commandText = '個股 ' + code;
                     if (days) { commandText += ' ' + days; }
-                    liff.sendMessages([{ type: 'text', text: commandText }]).then(() => { liff.closeWindow(); }).catch(err => { alert("傳送失敗：" + err); });
-                } else { alert("請先輸入股票代碼！"); }
+                    liff.sendMessages([{ type: 'text', text: commandText }]).then(() => { liff.closeWindow(); }).catch(err => { alert("數據傳輸失敗：" + err); });
+                } else { alert("請輸入有效的股票代碼。"); }
             }
         </script>
     </body>
@@ -92,7 +92,7 @@ def liff_page():
     """
 
 # ==========================================
-# 4. LINE 機器人訊息處理邏輯
+# 4. LINE 訊息處理核心邏輯
 # ==========================================
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
@@ -100,27 +100,26 @@ def handle_message(event):
     user_text = event.message.text.strip()
     msg = user_text.split()
     
-    reply_text = "⚠️ 無法辨識您的指令。\n💡 請輸入『功能』查看完整選單。"
+    reply_text = "⚠️ 未能辨識該指令。請輸入「功能」以獲取系統操作指南。"
     
     try:
         user_id = event.source.user_id
         user_data = db.reference(f'users/{user_id}').get()
 
+        # 權限驗證：新用戶 Google 帳戶授權引導
         if not user_data or 'refresh_token' not in user_data:
             auth_link = f"{RENDER_URL}/authorize/{user_id}?openExternalBrowser=1"
             reply_text = (
-                "✨ 歡迎使用 FinanceBot 財務管家 ✨\n"
+                "【 FinanceBot 資產管理助理 】\n"
                 "═════════════════\n"
-                "您的專屬 AI 理財助理已成功連線！\n\n"
-                "💡 核心功能亮點：\n"
-                "🔹 隨手記帳 ➔ AI 自動精準分類\n"
-                "🔹 行情追蹤 ➔ 即時大盤與詳細 K 線\n"
-                "🔹 雲端報表 ➔ 隨時匯總試算表\n\n"
-                "🚀 請先點擊下方連結完成 Google 授權：\n"
+                "歡迎使用 FinanceBot 財務數據管理系統。\n\n"
+                "本系統提供自動化收支會計紀錄、市場大盤動態及個股歷史數據分析。為啟用您的專屬雲端帳本，請先完成 Google 帳戶安全授權。\n\n"
+                "👉 授權連結：\n"
                 f"🔗 {auth_link}\n\n"
-                "⚠️ 提示：若出現「Google 尚未驗證」，請點選【進階】➔【允許存取】即可安全啟用。"
+                "※ 安全提示：若程序中出現「Google 尚未驗證」之警示，請點選【進階】並選擇【允許存取】即可完成安全性綁定。"
             )
         else:
+            # 載入 Google 憑證組態
             creds = Credentials(
                 token=user_data['token'], refresh_token=user_data['refresh_token'],
                 token_uri=user_data['token_uri'], client_id=user_data['client_id'],
@@ -129,30 +128,37 @@ def handle_message(event):
             sheets_service = build('sheets', 'v4', credentials=creds)
             spreadsheet_id = user_data.get('spreadsheet_id')
 
+            # 宣告請求對話，避免頻率限制
             req_session = requests.Session()
             req_session.headers.update({"User-Agent": "Mozilla/5.0"})
 
-            # --- 指令分支 ---
+            # ==========================================
+            # 指令集業務邏輯
+            # ==========================================
+            
+            # 指令：獲取操作指南
             if user_text in ["功能", "幫助", "help", "功能指南"]:
                 reply_text = (
-                    "📱【 FinanceBot 功能指令指南 】\n"
+                    "📋【 FinanceBot 系統操作指南 】\n"
                     "═════════════════\n"
-                    "官方全新升級為【AI 智能語意版】\n\n"
-                    "📝 AI 智慧記帳\n"
-                    "👉 直接輸入「項目 金額」\n"
-                    " ▫️ 範例：`去路易莎喝拿鐵 145`\n"
-                    " ▫️ 範例：`發放接案獎金 15000`\n\n"
-                    "📈 投資行情查詢\n"
-                    "👉 輸入 `大盤` ➔ 查台股指數分析\n"
-                    "👉 輸入 `個股 2330` ➔ 查今日詳細行情\n"
-                    "👉 輸入 `個股 2330 5` ➔ 查 5 日歷史 K 線\n\n"
-                    "💰 雲端財務報表\n"
-                    "👉 輸入 `收支` ➔ 查看明細與本月結餘\n"
-                    "👉 輸入 `重置帳本` ➔ 清空現有測試數據\n"
+                    "請依據下列標準格式輸入指令，或搭配圖文選單進行操作：\n\n"
+                    "■ 智慧會計記帳\n"
+                    "格式 ➔ [項目名稱] [半形空格] [金額]\n"
+                    " ▫️ 範例：`路易莎咖啡 75`\n"
+                    " ▫️ 範例：`專案報酬 15000`\n"
+                    "（系統將自動解析語意並歸類至雲端帳本）\n\n"
+                    "■ 市場行情查詢\n"
+                    " ▫️ 大盤 ➔ 台灣加權指數當日走勢分析\n"
+                    " ▫️ 個股 [代碼] ➔ 指定個股當日詳細 K 線數據\n"
+                    " ▫️ 個股 [代碼] [天數] ➔ 指定個股歷史數據變動表\n\n"
+                    "■ 雲端帳務管理\n"
+                    " ▫️ 收支 ➔ 匯總本月財務摘要與分類明細表\n"
+                    " ▫️ 重置帳本 ➔ 清空現有數據並還原初始欄位\n"
                     "═════════════════\n"
-                    "💡 提示：點擊下方圖文選單可直接開啟「網頁介面」免空格查詢股票！"
+                    "※ 提示：點擊下方選單可直接開啟網頁介面，進行免空格個股查詢。"
                 )
 
+            # 指令：台灣大盤加權指數查詢
             elif user_text in ["大盤", "大盤走勢"]:
                 ticker = yf.Ticker("^TWII", session=req_session)
                 hist = ticker.history(period="2d")
@@ -163,19 +169,20 @@ def handle_message(event):
                     change_percent = (change / prev_close) * 100 if prev_close else 0
                     sign = "▲" if change > 0 else "▼" if change < 0 else "─"
                     reply_text = (
-                        f"📊【 今日大盤分析 · 台灣加權 】\n"
+                        f"📊【 市場行情動態 · 台灣加權指數 】\n"
                         f"═════════════════\n"
-                        f" 🔹 當前指數 ｜ {price:,.2f} 點\n"
-                        f" 🔸 今日漲跌 ｜ {sign} {abs(change):.2f} ({change_percent:+.2f}%)\n"
+                        f" ▪️ 當前指數 ｜ {price:,.2f} 點\n"
+                        f" ▪️ 當日漲跌 ｜ {sign} {abs(change):.2f} ({change_percent:+.2f}%)\n"
                         f"═════════════════\n"
-                        f"📅 資料時間：{hist.index[-1].strftime('%Y-%m-%d')}"
+                        f"📅 數據時間：{hist.index[-1].strftime('%Y-%m-%d')}"
                     )
                 else:
-                    reply_text = "❌ 目前無法取得大盤資料，請稍後再試。"
+                    reply_text = "❌ 系統提示：無法取得大盤即時數據，請稍後再試。"
 
+            # 指令：本月財務摘要匯總
             elif "收支" in user_text or "財報" in user_text:
                 if not spreadsheet_id:
-                    reply_text = "⚠️ 找不到您的試算表，請輸入『重置帳本』來建立。"
+                    reply_text = "⚠️ 系統提示：未偵測到雲端試算表帳本，請輸入「重置帳本」以進行初始化。"
                 else:
                     result = sheets_service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range='A:D').execute()
                     values = result.get('values', [])
@@ -191,24 +198,25 @@ def handle_message(event):
                     net_balance = total_income - total_expense
                     
                     reply_text = (
-                        f"💰【 本月收支理財儀表板 】\n"
+                        f"💰【 本月財務收支摘要報告 】\n"
                         f"═════════════════\n"
-                        f" 🟢 總 收 入 ｜ ${total_income:,}\n"
-                        f" 🔴 總 支 出 ｜ ${total_expense:,}\n"
+                        f" 🟢 總計收入 ｜ ${total_income:,}\n"
+                        f" 🔴 總計支出 ｜ ${total_expense:,}\n"
                         f"═════════════════\n"
-                        f"💡【 各項支出明細 】\n"
+                        f"📋【 各項目會計明細 】\n"
                     )
                     if expense_detail:
                         for cat, amt in expense_detail.items():
                             reply_text += f" ▫️ {cat} ｜ ${amt:,}\n"
                     else:
-                        reply_text += "   暫無任何支出紀錄。\n"
+                        reply_text += "   當前無任何會計紀錄。\n"
                         
                     reply_text += (
                         f"═════════════════\n"
-                        f"✨ 本月結餘 ｜ ${net_balance:,}"
+                        f"🔹 本期淨結餘 ｜ ${net_balance:,}"
                     )
 
+            # 指令：清空帳本
             elif user_text == "重置帳本":
                 if spreadsheet_id:
                     sheets_service.spreadsheets().values().clear(spreadsheetId=spreadsheet_id, range='A:D').execute()
@@ -216,12 +224,13 @@ def handle_message(event):
                         spreadsheetId=spreadsheet_id, range="A1", valueInputOption="USER_ENTERED",
                         body={'values': [["日期", "分類", "項目", "金額"]]}
                     ).execute()
-                    reply_text = "✅ 系統重置完畢，帳本已更新為初始狀態。"
+                    reply_text = "✅ 系統提示：雲端試算表數據已清空，成功初始化會計科目欄位。"
 
+            # 指令：個股數據查詢
             elif user_text.startswith("個股"):
                 stock_args = user_text.replace("個股", "").strip().split()
                 if len(stock_args) == 0:
-                    reply_text = "⚠️ 請在「個股」後面加上半形空格與代號。\n▫️ 範例：`個股 2330`"
+                    reply_text = "⚠️ 格式不符。請在「個股」後加上半形空格與代號。\n▫️ 範例：`個股 2330`"
                 else:
                     ticker_input = stock_args[0].upper()
                     is_single_day = len(stock_args) == 1
@@ -255,54 +264,53 @@ def handle_message(event):
                             w52_low = hist['Low'].min()
                             
                             reply_text = (
-                                f"📈【 個股詳細行情 · {ticker_input} 】\n"
+                                f"📈【 數據分析報告 · {ticker_input} 】\n"
                                 f"═════════════════\n"
-                                f" 💰 當前收盤 ｜ ${price:.2f}\n"
-                                f" 🔸 今日漲跌 ｜ {sign} {abs(change):.2f} ({change_percent:+.2f}%)\n"
-                                f" 🚪 今日開盤 ｜ ${open_p:.2f}\n"
-                                f" 🔝 今日最高 ｜ ${high_p:.2f}\n"
-                                f" 📉 今日最低 ｜ ${low_p:.2f}\n"
-                                f" 📊 成交股數 ｜ {int(latest['Volume']):,} 股\n"
+                                f" ▪️ 當前收盤 ｜ ${price:.2f}\n"
+                                f" ▪️ 當日漲跌 ｜ {sign} {abs(change):.2f} ({change_percent:+.2f}%)\n"
+                                f" ▪️ 當日開盤 ｜ ${open_p:.2f}\n"
+                                f" ▪️ 當日最高 ｜ ${high_p:.2f}\n"
+                                f" ▪️ 當日最低 ｜ ${low_p:.2f}\n"
+                                f" ▪️ 成交股數 ｜ {int(latest['Volume']):,} 股\n"
                                 f"═════════════════\n"
-                                f" ⭐ 52週最高 ｜ ${w52_high:.2f}\n"
-                                f" 🌙 52週最低 ｜ ${w52_low:.2f}\n"
+                                f" ▪️ 52週最高 ｜ ${w52_high:.2f}\n"
+                                f" ▪️ 52週最低 ｜ ${w52_low:.2f}\n"
                                 f"═════════════════\n"
-                                f"📅 資料時間：{hist.index[-1].strftime('%Y-%m-%d')}"
+                                f"📅 數據時間：{hist.index[-1].strftime('%Y-%m-%d')}"
                             )
                         else:
                             days = int(stock_args[1])
                             sub_hist = hist.tail(days)
-                            reply_text = f"📊【 {ticker_input} 過去 {days} 天歷史資訊 】\n═════════════════\n"
+                            reply_text = f"📊【 歷史交易數據變動表 · {ticker_input} 】\n═════════════════\n"
                             for date, row in reversed(list(sub_hist.iterrows())):
                                 reply_text += f"📅 {date.strftime('%m/%d')} ｜ 收盤: ${row['Close']:.2f} ｜ 高: ${row['High']:.2f} ｜ 低: ${row['Low']:.2f}\n"
                     else:
-                        reply_text = f"❌ 找不到股票代號：{ticker_input}。"
+                        reply_text = f"❌ 系統提示：於市場數據庫中未搜尋到代號「{ticker_input}」，請確認後重試。"
 
-            # 功能六：AI 智慧語意記帳 (換裝 2026 最新大腦模型池)
+            # 指令：智慧語意解析記帳
             elif len(msg) == 2 and msg[1].isdigit():
                 item, price = msg[0], int(msg[1])
                 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 
                 category = "其他支出"
-                ai_status = "❌ AI大腦未啟動 (環境變數缺失)"
+                ai_status = "❌ 語意解析模組未啟動 (環境設定異常)"
                 is_ai_success = False
                 
                 if ai_model:
                     prompt = (
-                        f"你是一個極度專業且嚴格的理財記帳助手。請幫我將這個消費/收入項目「{item}」進行精準分類。\n"
-                        f"你【只能】從以下選項中挑選一個完全相同的詞彙作為你的回答，絕對不能自己發明新詞：\n"
+                        f"你是一個客觀、嚴謹的財務會計分類系統。請幫我將這個收支項目「{item}」進行標準化分類。\n"
+                        f"你【只能】從以下選項中挑選一個完全相同的詞彙作為你的回答，絕對不能包含任何其他字詞、解釋或符號：\n"
                         f"[伙食費, 交通費, 娛樂費, 日用品, 帳單費, 收入, 其他支出]\n\n"
-                        f"【分類原則指引】\n"
-                        f"- 任何早餐、午餐、晚餐、飲料、大餐、外送、買菜 ➔ 伙食費\n"
-                        f"- 任何儲值、課金、手遊、買遊戲、看電影、唱歌、Netflix或Spotify訂閱、買玩具 ➔ 娛樂費\n"
-                        f"- 搭車、計程車、捷運、加油、高鐵、車輛維修 ➔ 交通費\n"
-                        f"- 薪水、獎金、接案、外快、股票股息 ➔ 收入\n"
-                        f"- 衛生紙、洗面乳、藥品、生活五金工具 ➔ 日用品\n"
-                        f"- 水電費、電話費、瓦斯費、網路費、保險費 ➔ 帳單費\n\n"
-                        f"⚠️ 核心要求：絕對不要輸出任何解釋、標點符號、引號、括號或多餘空白，只需要回答那三個字或四個字即可。"
+                        f"【會計準則指引】\n"
+                        f"- 任何餐飲、外送、食材採購 ➔ 伙食費\n"
+                        f"- 任何遊戲儲值、電影、數位娛樂訂閱、休閒娛樂 ➔ 娛樂費\n"
+                        f"- 運輸交通、計程車、燃油支出、大眾運輸 ➔ 交通費\n"
+                        f"- 薪資收入、業務報酬、投資收益 ➔ 收入\n"
+                        f"- 生活常用品、清潔用品、醫療保健 ➔ 日用品\n"
+                        f"- 公共事業規費、電信費、保險費、固定帳單 ➔ 帳單費\n\n"
+                        f"核心要求：請保持回答的純淨度，只需直接輸出對應的科目名稱即可。"
                     )
                     
-                    # 🚀 更換為 2026 現行可用的最新模型池
                     model_pool = ['gemini-3.5-flash', 'gemini-2.5-flash', 'gemini-3.1-flash-lite']
                     
                     for model_name in model_pool:
@@ -322,7 +330,7 @@ def handle_message(event):
                             if is_ai_success:
                                 break
                         except Exception as e:
-                            ai_status = f"💥 {model_name}錯誤: {str(e)}"
+                            ai_status = f"💥 模組錯誤 ({model_name}): {str(e)}"
                             continue
                 
                 if spreadsheet_id:
@@ -332,19 +340,19 @@ def handle_message(event):
                     ).execute()
                     
                     if is_ai_success:
-                        reply_text = f"✅ 已紀錄：[{category}✨] {item} ${price}"
+                        reply_text = f"✅ 帳務紀錄成功：[{category}] {item} ${price}"
                     else:
-                        reply_text = f"✅ 已紀錄：[{category}☁️] {item} ${price}\n🔧 診斷提示：{ai_status}"
+                        reply_text = f"✅ 帳務紀錄成功：[{category}] {item} ${price}\n🔧 系統日誌：{ai_status}"
                 else:
-                    reply_text = "⚠️ 找不到帳本，請先輸入『重置帳本』。"
+                    reply_text = "⚠️ 系統提示：未偵測到雲端試算表帳本，請輸入「重置帳本」以進行初始化。"
 
     except ValueError:
-        reply_text = "⚠️ 【資料格式異常】\n請檢查 Google 試算表欄位是否誤填。"
+        reply_text = "⚠️ 【資料型態衝突】\n請檢查雲端試算表內「金額」欄位是否包含非數字符號。"
     except Exception as e:
         if "invalid_grant" in str(e).lower():
-            reply_text = "⚠️ 【授權狀態失效】\n請隨意輸入文字重新點擊連結綁定 Google 帳號。"
+            reply_text = "⚠️ 【憑證失效】\n安全性金鑰已過期，請隨意輸入文字重新觸發 Google 帳戶安全授權程序。"
         else:
-            reply_text = f"⚠️ 系統處理時發生異常，請稍後再試。\n(錯誤代碼：{str(e)[:40]})"
+            reply_text = f"⚠️ 系統核心處理異常，程序已安全中斷。\n(錯誤代碼：{str(e)[:40]})"
 
     with ApiClient(configuration) as api_client:
         MessagingApi(api_client).reply_message(ReplyMessageRequest(
@@ -352,7 +360,7 @@ def handle_message(event):
         ))
 
 # ==========================================
-# 5. LINE Webhook 通道
+# 5. LINE Webhook 接收通道
 # ==========================================
 @app.route("/callback", methods=['POST'])
 def callback():
@@ -361,7 +369,7 @@ def callback():
     try:
         handler.handle(body, signature)
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Callback Verification Failed: {e}")
         abort(400)
     return 'OK'
 
