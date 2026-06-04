@@ -4,7 +4,7 @@ import re
 import requests
 import yfinance as yf
 from datetime import datetime
-from flask import Flask, request, abort
+from flask import Flask, request, abort, redirect
 import firebase_admin
 from firebase_admin import credentials, db
 from linebot.v3 import WebhookHandler
@@ -35,6 +35,10 @@ LINE_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
 LINE_SECRET = os.environ.get('LINE_CHANNEL_SECRET')
 RENDER_URL = os.environ.get('RENDER_URL')
 
+# Google OAuth 環境變數設定
+GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID')
+GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET')
+
 configuration = Configuration(access_token=LINE_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_SECRET)
 
@@ -47,7 +51,81 @@ if not firebase_admin._apps:
         firebase_admin.initialize_app(cred, {'databaseURL': db_url})
 
 # ==========================================
-# 3. LIFF 數據查詢網頁路由
+# 3. Google OAuth2 授權路由 (全新補回核心)
+# ==========================================
+@app.route('/authorize/<user_id>')
+def authorize(user_id):
+    """引導用戶前往 Google 進行安全授權"""
+    redirect_uri = f"{RENDER_URL}/oauth2callback"
+    scopes = 'https://www.googleapis.com/auth/spreadsheets'
+    
+    auth_url = (
+        f"https://accounts.google.com/o/oauth2/v2/auth?"
+        f"client_id={GOOGLE_CLIENT_ID}&"
+        f"redirect_uri={redirect_uri}&"
+        f"response_type=code&"
+        f"scope={scopes}&"
+        f"access_type=offline&"
+        f"prompt=consent&"
+        f"state={user_id}"
+    )
+    return redirect(auth_url)
+
+@app.route('/oauth2callback')
+def oauth2callback():
+    """接收 Google 回傳 Token，並自動建立專屬雲端帳本"""
+    code = request.args.get('code')
+    user_id = request.args.get('state')
+    redirect_uri = f"{RENDER_URL}/oauth2callback"
+    token_url = "https://oauth2.googleapis.com/token"
+    
+    # 透過 Code 交換 Access & Refresh Token
+    data = {
+        'code': code,
+        'client_id': GOOGLE_CLIENT_ID,
+        'client_secret': GOOGLE_CLIENT_SECRET,
+        'redirect_uri': redirect_uri,
+        'grant_type': 'authorization_code'
+    }
+    res = requests.post(token_url, data=data).json()
+    
+    if 'access_token' in res:
+        # 動態構建暫時憑證以建立新試算表
+        creds = Credentials(
+            token=res['access_token'], refresh_token=res.get('refresh_token'),
+            token_uri=token_url, client_id=GOOGLE_CLIENT_ID,
+            client_secret=GOOGLE_CLIENT_SECRET, scopes=['https://www.googleapis.com/auth/spreadsheets']
+        )
+        sheets_service = build('sheets', 'v4', credentials=creds)
+        
+        # 1. 於用戶雲端硬碟建立全新試算表
+        spreadsheet_body = {'properties': {'title': 'FinanceBot 雲端財務帳本'}}
+        spreadsheet = sheets_service.spreadsheets().create(body=spreadsheet_body, fields='spreadsheetId').execute()
+        spreadsheet_id = spreadsheet.get('spreadsheetId')
+        
+        # 2. 寫入標準會計科目初始表頭
+        sheets_service.spreadsheets().values().append(
+            spreadsheetId=spreadsheet_id, range="A1", valueInputOption="USER_ENTERED",
+            body={'values': [["日期", "分類", "項目", "金額"]]}
+        ).execute()
+        
+        # 3. 將憑證與專屬帳本 ID 完整同步回寫至 Firebase 節點 (多用戶隔離)
+        db.reference(f'users/{user_id}').set({
+            'token': res['access_token'],
+            'refresh_token': res.get('refresh_token'),
+            'token_uri': token_url,
+            'client_id': GOOGLE_CLIENT_ID,
+            'client_secret': GOOGLE_CLIENT_SECRET,
+            'scopes': ['https://www.googleapis.com/auth/spreadsheets'],
+            'spreadsheet_id': spreadsheet_id
+        })
+        
+        return "<h3 style='font-family:sans-serif; text-align:center; margin-top:50px; color:#06c755;'>🎉 帳戶授權成功！您的個人獨立雲端帳本已初始化完畢。<br>現在可以關閉此網頁，返回 LINE 開始體驗記帳了！</h3>"
+    else:
+        return f"<h3 style='font-family:sans-serif; text-align:center; margin-top:50px; color:#dd3333;'>❌ 授權程序失敗，請聯繫系統管理員。<br>日誌摘要：{json.dumps(res)}</h3>"
+
+# ==========================================
+# 4. LIFF 數據查詢網頁路由
 # ==========================================
 @app.route('/liff')
 def liff_page():
@@ -93,7 +171,7 @@ def liff_page():
     """
 
 # ==========================================
-# 4. 新增：加入好友即時推送授權連結機制
+# 5. 加入好友即時推送授權連結機制
 # ==========================================
 @handler.add(FollowEvent)
 def handle_follow(event):
@@ -118,7 +196,7 @@ def handle_follow(event):
         ))
 
 # ==========================================
-# 5. LINE 訊息處理核心邏輯（模糊比對優化版）
+# 6. LINE 訊息處理核心邏輯（模糊比對優化版）
 # ==========================================
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
@@ -395,7 +473,7 @@ def handle_message(event):
         ))
 
 # ==========================================
-# 6. LINE Webhook 接收通道
+# 7. LINE Webhook 接收通道
 # ==========================================
 @app.route("/callback", methods=['POST'])
 def callback():
