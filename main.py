@@ -37,7 +37,6 @@ RENDER_URL = os.environ.get('RENDER_URL')
 configuration = Configuration(access_token=LINE_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_SECRET)
 
-# 初始化 Firebase 連線
 if not firebase_admin._apps:
     fb_config_str = os.environ.get('FIREBASE_CONFIG_JSON')
     db_url = os.environ.get('FIREBASE_DB_URL')
@@ -47,7 +46,7 @@ if not firebase_admin._apps:
         firebase_admin.initialize_app(cred, {'databaseURL': db_url})
 
 # ==========================================
-# 3. LIFF 股票查詢專屬網頁路由 (解鎖英文與空格限制)
+# 3. LIFF 股票查詢專屬網頁路由
 # ==========================================
 @app.route('/liff')
 def liff_page():
@@ -107,7 +106,6 @@ def handle_message(event):
         user_id = event.source.user_id
         user_data = db.reference(f'users/{user_id}').get()
 
-        # 區塊 A：歡迎新用戶完成 Google 授權 (優化版排版)
         if not user_data or 'refresh_token' not in user_data:
             auth_link = f"{RENDER_URL}/authorize/{user_id}?openExternalBrowser=1"
             reply_text = (
@@ -123,7 +121,6 @@ def handle_message(event):
                 "⚠️ 提示：若出現「Google 尚未驗證」，請點選【進階】➔【允許存取】即可安全啟用。"
             )
         else:
-            # 初始化 Google API 憑證
             creds = Credentials(
                 token=user_data['token'], refresh_token=user_data['refresh_token'],
                 token_uri=user_data['token_uri'], client_id=user_data['client_id'],
@@ -132,15 +129,10 @@ def handle_message(event):
             sheets_service = build('sheets', 'v4', credentials=creds)
             spreadsheet_id = user_data.get('spreadsheet_id')
 
-            # 初始化網路請求 Session
             req_session = requests.Session()
             req_session.headers.update({"User-Agent": "Mozilla/5.0"})
 
-            # ==========================================
-            # 核心指令分支邏輯
-            # ==========================================
-            
-            # 功能一：新版精美指令功能選單
+            # --- 功能分支 ---
             if user_text in ["功能", "幫助", "help", "功能指南"]:
                 reply_text = (
                     "📱【 FinanceBot 功能指令指南 】\n"
@@ -161,7 +153,6 @@ def handle_message(event):
                     "💡 提示：點擊下方圖文選單可直接開啟「網頁介面」免空格查詢股票！"
                 )
 
-            # 功能二：台股大盤查詢 (優化版排版)
             elif user_text in ["大盤", "大盤走勢"]:
                 ticker = yf.Ticker("^TWII", session=req_session)
                 hist = ticker.history(period="2d")
@@ -182,7 +173,6 @@ def handle_message(event):
                 else:
                     reply_text = "❌ 目前無法取得大盤資料，請稍後再試。"
 
-            # 功能三：本月收支理財儀表板 (優化版排版)
             elif "收支" in user_text or "財報" in user_text:
                 if not spreadsheet_id:
                     reply_text = "⚠️ 找不到您的試算表，請輸入『重置帳本』來建立。"
@@ -219,7 +209,6 @@ def handle_message(event):
                         f"✨ 本月結餘 ｜ ${net_balance:,}"
                     )
 
-            # 功能四：重置帳本
             elif user_text == "重置帳本":
                 if spreadsheet_id:
                     sheets_service.spreadsheets().values().clear(spreadsheetId=spreadsheet_id, range='A:D').execute()
@@ -229,7 +218,6 @@ def handle_message(event):
                     ).execute()
                     reply_text = "✅ 系統重置完畢，帳本已更新為初始狀態。"
 
-            # 功能五：個股詳細行情 (含開高低、52週高低、上櫃股票 Bug 修正與對齊排版)
             elif user_text.startswith("個股"):
                 stock_args = user_text.replace("個股", "").strip().split()
                 if len(stock_args) == 0:
@@ -248,7 +236,7 @@ def handle_message(event):
                             hist = stock.history(period=fetch_period)
                             if not hist.empty: break
                         except Exception:
-                            continue  # 忽略 404 報錯，自動尋找下一個後綴 (.TWO)
+                            continue
                             
                     if hist is not None and not hist.empty:
                         if is_single_day:
@@ -288,13 +276,16 @@ def handle_message(event):
                             for date, row in reversed(list(sub_hist.iterrows())):
                                 reply_text += f"📅 {date.strftime('%m/%d')} ｜ 收盤: ${row['Close']:.2f} ｜ 高: ${row['High']:.2f} ｜ 低: ${row['Low']:.2f}\n"
                     else:
-                        reply_text = f"❌ 找不到股票代號：{ticker_input}，請確認代碼是否正確。"
+                        reply_text = f"❌ 找不到股票代號：{ticker_input}。"
 
-            # 功能六：AI 智慧語意記帳 (含提示詞優化與強力過濾去污機制)
+            # 功能六：AI 智慧語意記帳 (全新升級：診斷防護版)
             elif len(msg) == 2 and msg[1].isdigit():
                 item, price = msg[0], int(msg[1])
                 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                category = "其他支出"
+                
+                category = "其他支出" # 預設值
+                ai_status = "❌ AI大腦未啟動 (請檢查 Render 環境變數 GEMINI_API_KEY)"
+                is_ai_success = False
                 
                 if ai_model:
                     prompt = (
@@ -312,24 +303,31 @@ def handle_message(event):
                     )
                     try:
                         ai_response = ai_model.generate_content(prompt)
-                        # 強力去污過濾：剝除所有可能的符號干擾
                         predicted_category = ai_response.text.strip().replace("'", "").replace('"', '').replace("「", "").replace("」", "")
                         
-                        # 包含比對機制
                         possible_categories = ["伙食費", "交通費", "娛樂費", "日用品", "帳單費", "收入", "其他支出"]
                         for cat in possible_categories:
                             if cat in predicted_category:
                                 category = cat
+                                ai_status = "OK"
+                                is_ai_success = True
                                 break
-                    except Exception:
-                        pass
+                        if not is_ai_success:
+                            ai_status = f"⚠️ AI回傳未知格式: {predicted_category[:15]}"
+                    except Exception as e:
+                        ai_status = f"💥 AI連線報錯: {str(e)[:25]}"
                 
                 if spreadsheet_id:
                     sheets_service.spreadsheets().values().append(
                         spreadsheetId=spreadsheet_id, range="A1", valueInputOption="USER_ENTERED",
                         body={'values': [[now, category, item, price]]}
                     ).execute()
-                    reply_text = f"✅ 已紀錄：[{category}✨] {item} ${price}"
+                    
+                    # 依據診斷結果吐出不同的表情符號
+                    if is_ai_success:
+                        reply_text = f"✅ 已紀錄：[{category}✨] {item} ${price}"
+                    else:
+                        reply_text = f"✅ 已紀錄：[{category}☁️] {item} ${price}\n🔧 診斷提示：{ai_status}"
                 else:
                     reply_text = "⚠️ 找不到帳本，請先輸入『重置帳本』。"
 
@@ -341,14 +339,13 @@ def handle_message(event):
         else:
             reply_text = f"⚠️ 系統處理時發生異常，請稍後再試。\n(錯誤代碼：{str(e)[:40]})"
 
-    # 統一發送出口
     with ApiClient(configuration) as api_client:
         MessagingApi(api_client).reply_message(ReplyMessageRequest(
             reply_token=reply_token, messages=[TextMessage(text=reply_text)]
         ))
 
 # ==========================================
-# 5. LINE Webhook 門戶通道
+# 5. LINE Webhook 通道
 # ==========================================
 @app.route("/callback", methods=['POST'])
 def callback():
@@ -357,7 +354,7 @@ def callback():
     try:
         handler.handle(body, signature)
     except Exception as e:
-        print(f"Error in callback: {e}")
+        print(f"Error: {e}")
         abort(400)
     return 'OK'
 
