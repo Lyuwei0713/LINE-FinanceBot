@@ -3,7 +3,7 @@ import json
 import re
 import requests
 import yfinance as yf
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from flask import Flask, request, abort, redirect
 import firebase_admin
 from firebase_admin import credentials, db
@@ -29,13 +29,13 @@ else:
     ai_model = False
 
 # ==========================================
-# 2. 讀取環境變數與安全設定 
+# 2. 讀取環境變數與安全設定 (自動相容全格式機制)
 # ==========================================
 LINE_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
 LINE_SECRET = os.environ.get('LINE_CHANNEL_SECRET')
 RENDER_URL = os.environ.get('RENDER_URL')
 
-# 自動偵測並解析單一 JSON 字串環境變數
+# 自動偵測並解析單一 JSON 字串環境變數，防止 401 錯誤
 G_CLIENT_SECRET_JSON = os.environ.get('G_CLIENT_SECRET_JSON')
 GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID')
 GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET')
@@ -49,11 +49,9 @@ if G_CLIENT_SECRET_JSON:
     except Exception as e:
         print(f"解析 G_CLIENT_SECRET_JSON 失敗: {e}")
 
-# 建立 LINE 設定實例
 configuration = Configuration(access_token=LINE_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_SECRET)
 
-# 初始化 Firebase 節點
 if not firebase_admin._apps:
     fb_config_str = os.environ.get('FIREBASE_CONFIG_JSON')
     db_url = os.environ.get('FIREBASE_DB_URL')
@@ -227,7 +225,7 @@ def handle_message(event):
                 "本系統提供自動化收支會計紀錄、市場大盤動態及個股歷史數據分析。為啟用您的專屬雲端帳本，請先完成 Google 帳戶安全授權。\n\n"
                 "👉 授權連結：\n"
                 f"🔗 {auth_link}\n\n"
-                "※ 安全提示：若程序中出現「Google 尚未驗證」之警示，請點選【進階】並選擇【允許存取】即可完成安全性綁定。"
+                "※ 安全提示：若程序中出現「Google 尚未驗證’之警示，請點選【進階】並選擇【允許存取】即可完成安全性綁定。"
             )
         else:
             creds = Credentials(
@@ -243,7 +241,6 @@ def handle_message(event):
 
             # ---- 智慧語意模糊判定分支 ----
             
-            # 1. 操作指南模糊判定
             if any(k in user_text for k in ["功能", "幫助", "help", "指南", "怎麼用", "選單", "指令", "說明"]):
                 reply_text = (
                     "📋【 FinanceBot 系統操作指南 】\n"
@@ -266,7 +263,6 @@ def handle_message(event):
                     "※ 提示：點擊下方選單可直接開啟網頁介面，進行免空格個股查詢。"
                 )
 
-            # 2. 帳本直達連結模糊判定
             elif any(k in user_text for k in ["帳本", "連結", "表格", "試算表", "excel", "查帳", "網址", "我的帳", "雲端帳"]):
                 if spreadsheet_id:
                     reply_text = (
@@ -278,7 +274,6 @@ def handle_message(event):
                 else:
                     reply_text = "⚠️ 系統提示：未偵測到雲端試算表帳本，請輸入「重置帳本」以進行初始化。"
 
-            # 3. 清空與還原帳本模糊判定
             elif any(k in user_text for k in ["重置", "重製", "清空", "洗掉", "刪除帳", "還原帳", "重新初始化"]):
                 if spreadsheet_id:
                     sheets_service.spreadsheets().values().clear(spreadsheetId=spreadsheet_id, range='A:D').execute()
@@ -288,7 +283,6 @@ def handle_message(event):
                     ).execute()
                     reply_text = "✅ 系統提示：雲端試算表數據已清空，成功初始化會計科目欄位。"
 
-            # 4. 台灣大盤加權指數模糊判定
             elif any(k in user_text for k in ["大盤", "加權指數", "台股走勢", "市場行情"]):
                 ticker = yf.Ticker("^TWII", session=req_session)
                 hist = ticker.history(period="2d")
@@ -309,7 +303,6 @@ def handle_message(event):
                 else:
                     reply_text = "❌ 系統提示：無法取得大盤即時數據，請稍後再試。"
 
-            # 5. 本月財務摘要模糊判定
             elif any(k in user_text for k in ["收支", "財報", "財務報告", "花多少", "結餘", "帳目", "統計"]):
                 if not spreadsheet_id:
                     reply_text = "⚠️ 系統提示：未偵測到雲端試算表帳本，請輸入「重置帳本」以進行初始化。"
@@ -346,7 +339,6 @@ def handle_message(event):
                         f"🔹 本期淨結餘 ｜ ${net_balance:,}"
                     )
 
-            # 6. 個股數據查詢 (Token 提取免空格技術)
             elif any(k in user_text for k in ["個股", "股票"]):
                 tokens = re.findall(r'[A-Za-z0-9]+', user_text)
                 if not tokens:
@@ -355,7 +347,7 @@ def handle_message(event):
                     ticker_input = tokens[0].upper()
                     is_single_day = len(tokens) == 1
                     
-                    fetch_period = "1y" if is_single_day else f"{int(tokens[1]) + 5}d"
+                    fetch_period = "1y"
                     tickers_to_try = [f"{ticker_input}.TW", f"{ticker_input}.TWO"] if ticker_input.isdigit() else [ticker_input]
                     
                     hist = None
@@ -407,28 +399,33 @@ def handle_message(event):
                     else:
                         reply_text = f"❌ 系統提示：於市場數據庫中未搜尋到代號「{ticker_input}」，請確認後重試。"
 
-            # 7. 智慧語意解析記帳 (標準輸入阻斷)
+            # ==========================================
+            # 7. 智慧語意解析記帳 (超廣視野現代生活化字典版)
+            # ==========================================
             elif len(msg) == 2 and msg[1].isdigit():
                 item, price = msg[0], int(msg[1])
-                now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                
+                tw_tz = timezone(timedelta(hours=8))
+                now = datetime.now(tw_tz).strftime("%Y-%m-%d %H:%M:%S")
                 
                 category = "其他支出"
-                ai_status = "❌ 語意解析模組未啟動 (環境設定異常)"
+                ai_status = "❌ 語意解析模組未啟動"
                 is_ai_success = False
                 
                 if ai_model:
                     prompt = (
-                        f"你是一個客觀、嚴謹的財務會計分類系統。請幫我將這個收支項目「{item}」進行精準分類。\n"
-                        f"你【只能】從以下選項中挑選一個完全相同的詞彙作為你的回答，絕對不能包含任何其他字詞、解釋或符號：\n"
+                        f"你是一個客觀、嚴謹且極具現代生活常識的財務會計分類專家。請幫我將收支項目「{item}」進行精準語意分類。\n"
+                        f"你【只能】從以下選項中挑選一個完全相同的科目名稱作為你的回答，絕對不能包含任何其他字詞、解釋、標點符號或空格：\n"
                         f"[伙食費, 交通費, 娛樂費, 日用品, 帳單費, 收入, 其他支出]\n\n"
-                        f"【會計準則指引】\n"
-                        f"- 任何餐飲、外送、食材採購 ➔ 伙食費\n"
-                        f"- 任何遊戲儲值、電影、數位娛樂訂閱、休閒娛樂 ➔ 娛樂費\n"
-                        f"- 運輸交通、計程車、燃油支出、大眾運輸 ➔ 交通費\n"
-                        f"- 薪資收入、業務報酬、投資收益、生活費、零用錢 ➔ 收入\n"
-                        f"- 生活常用品、清潔用品、醫療保健 ➔ 日用品\n"
-                        f"- 公共事業規費、電信費、保險費、固定帳單 ➔ 帳單費\n\n"
-                        f"核心要求：請保持回答的純淨度，只需直接輸出對應的科目名稱即可。"
+                        f"【網羅性會計分類指引】\n"
+                        f"- 伙食費 ➔ 包含三餐、宵夜、手搖飲料、咖啡、點心、零食、超市買菜、大餐聚餐、外送平台(UberEats/Foodpanda)等任何餐飲消費。\n"
+                        f"- 交通費 ➔ 包含捷運、公車、高鐵、台鐵、計程車(Uber/LINE Taxi)、加油、停車費、eTag過路費、機車汽車維修保養、定期票、共享機車等。\n"
+                        f"- 娛樂費 ➔ 包含電影、KTV、密室逃脫、遊戲儲值課金、動漫週邊、模型公仔、玩具、Netflix/Spotify/YoutubePremium等各類數位娛樂訂閱、展覽門票、旅遊住宿等。\n"
+                        f"- 日用品 ➔ 包含衛生紙、洗衣精等生活雜貨、衣服鞋子衣著、理髮剪髮、化妝品、保養品、醫美、藥品、看醫生掛號費、寵物飼料、貓砂、寵物用品等。\n"
+                        f"- 帳單費 ➔ 包含房租、水費、電費、瓦斯費、手機電話費、網路費、保險費、學費、學雜費、各類貸款償還、信用卡年費、政府稅金、交通罰單等固定規費。\n"
+                        f"- 收入 ➔ 包含薪資、正職薪水、兼職打工、年終獎金、專案報酬、外快、零用錢、投資獲利、股票配息、發票中獎、撿到錢、二手拍賣賣出等。\n"
+                        f"- 其他支出 ➔ 包含婚喪喜慶紅包白包、送禮物、請客、公益捐款、以及上述皆無法歸類的特殊雜支。\n\n"
+                        f"核心要求：請保持回答的絕對純淨，只需直接輸出上述七個科目之一的四個字即可，拒絕任何引號或廢話。"
                     )
                     
                     model_pool = ['gemini-3.5-flash', 'gemini-2.5-flash', 'gemini-3.1-flash-lite']
@@ -446,11 +443,9 @@ def handle_message(event):
                                     ai_status = "OK"
                                     is_ai_success = True
                                     break
-                            
                             if is_ai_success:
                                 break
-                        except Exception as e:
-                            ai_status = f"💥 模組錯誤 ({model_name}): {str(e)}"
+                        except Exception:
                             continue
                 
                 if spreadsheet_id:
@@ -480,7 +475,7 @@ def handle_message(event):
         ))
 
 # ==========================================
-# 7. LINE Webhook 接收通道
+# 8. LINE Webhook 接收通道
 # ==========================================
 @app.route("/callback", methods=['POST'])
 def callback():
